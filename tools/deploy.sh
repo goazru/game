@@ -15,7 +15,10 @@ cd "$(dirname "$0")/.."
 # gh-pages ブランチが存在しない場合は孤立ブランチとして作成
 if git ls-remote --exit-code origin "$BRANCH" >/dev/null 2>&1; then
   git worktree add "$WORKTREE_DIR" "$BRANCH"
-  # 既存ファイルをすべて削除して置き換え
+  find "$WORKTREE_DIR" -mindepth 1 -not -path '*/.git*' -delete
+elif git show-ref --quiet "refs/heads/$BRANCH"; then
+  # ローカルにあるがリモート未 push の場合
+  git worktree add "$WORKTREE_DIR" "$BRANCH"
   find "$WORKTREE_DIR" -mindepth 1 -not -path '*/.git*' -delete
 else
   git worktree add --orphan -b "$BRANCH" "$WORKTREE_DIR"
