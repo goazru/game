@@ -43,6 +43,7 @@ def _notify(msg: str):
 
 async def _deploy_via_script() -> str | None:
     deploy_script = REPO_ROOT / "tools" / "deploy.sh"
+    print(f"[deploy] start: {deploy_script}", flush=True)
     proc = await asyncio.create_subprocess_exec(
         "bash", str(deploy_script),
         cwd=REPO_ROOT,
@@ -53,8 +54,10 @@ async def _deploy_via_script() -> str | None:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=360)
     except asyncio.TimeoutError:
         proc.kill()
+        print(f"[deploy] timeout: {deploy_script}", flush=True)
         return "[デプロイタイムアウト]"
     output = stdout.decode() + stderr.decode()
+    print(f"[deploy] exit={proc.returncode} script={deploy_script}\n{output[:500]}", flush=True)
     if proc.returncode != 0:
         return f"[デプロイ失敗] {output[:300]}"
     match = re.search(r"URL:\s*(https://\S+)", output)
