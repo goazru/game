@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>廃墟に佇む少女</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0a0a0f;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Georgia', 'Times New Roman', serif;
+      color: #c8b89a;
+    }
+
+    .frame {
+      position: relative;
+      max-width: 520px;
+      width: 90%;
+    }
+
+    .frame::before {
+      content: '';
+      position: absolute;
+      inset: -12px;
+      border: 1px solid #4a3f30;
+      pointer-events: none;
+    }
+
+    .frame::after {
+      content: '';
+      position: absolute;
+      inset: -6px;
+      border: 1px solid #2a2018;
+      pointer-events: none;
+    }
+
+    .illustration {
+      width: 100%;
+      height: auto;
+      display: block;
+      filter: sepia(0.15) brightness(0.92);
+    }
+
+    .caption {
+      margin-top: 32px;
+      text-align: center;
+      letter-spacing: 0.3em;
+      font-size: 0.85rem;
+      color: #7a6a54;
+      line-height: 2;
+    }
+
+    .title {
+      font-size: 1.4rem;
+      color: #b8a484;
+      letter-spacing: 0.5em;
+      margin-bottom: 8px;
+    }
+
+    .corner {
+      position: absolute;
+      width: 20px;
+      height: 20px;
+      border-color: #6a5a42;
+      border-style: solid;
+    }
+    .corner.tl { top: -18px; left: -18px; border-width: 1px 0 0 1px; }
+    .corner.tr { top: -18px; right: -18px; border-width: 1px 1px 0 0; }
+    .corner.bl { bottom: -18px; left: -18px; border-width: 0 0 1px 1px; }
+    .corner.br { bottom: -18px; right: -18px; border-width: 0 1px 1px 0; }
+  </style>
+<!-- deploy-id:20260613015049-13725 --></head>
+<body>
+  <div class="frame">
+    <span class="corner tl"></span>
+    <span class="corner tr"></span>
+    <span class="corner bl"></span>
+    <span class="corner br"></span>
+    <img class="illustration" src="ruins_girl.png" alt="廃墟に佇む少女">
+  </div>
+  <div class="caption">
+    <div class="title">廃墟</div>
+    <div>時が止まった場所で、彼女はただ佇む。</div>
+  </div>
+</body>
+</html>
