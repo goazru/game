@@ -41,47 +41,25 @@ def _notify(msg: str):
     )
 
 
-def _find_deploy_dir() -> Path | None:
-    for d in ("dist", "build", "public", "out"):
-        p = REPO_ROOT / d
-        if (p / "index.html").exists():
-            return p
-    return None
-
-
-async def _deploy_pages() -> str | None:
-    deploy_dir = _find_deploy_dir()
-    if deploy_dir is None:
-        return None
+async def _deploy_via_script() -> str | None:
+    deploy_script = REPO_ROOT / "tools" / "deploy.sh"
     proc = await asyncio.create_subprocess_exec(
-        "gh", "pages", "deploy", str(deploy_dir),
+        "bash", str(deploy_script),
         cwd=REPO_ROOT,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
     try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=360)
     except asyncio.TimeoutError:
         proc.kill()
-        return None
-    if proc.returncode != 0:
-        return f"[デプロイ失敗] {stderr.decode()[:300]}"
-    # Try to extract URL from output
+        return "[デプロイタイムアウト]"
     output = stdout.decode() + stderr.decode()
-    match = re.search(r"https://\S+\.github\.io\S*", output)
+    if proc.returncode != 0:
+        return f"[デプロイ失敗] {output[:300]}"
+    match = re.search(r"URL:\s*(https://\S+)", output)
     if match:
-        return match.group(0)
-    # Fallback: build URL from remote
-    remote_proc = await asyncio.create_subprocess_exec(
-        "gh", "repo", "view", "--json", "url", "-q", ".url",
-        cwd=REPO_ROOT, stdout=asyncio.subprocess.PIPE
-    )
-    remote_out, _ = await remote_proc.communicate()
-    repo_url = remote_out.decode().strip()
-    if repo_url:
-        parts = repo_url.rstrip("/").split("/")
-        owner, repo = parts[-2], parts[-1]
-        return f"https://{owner}.github.io/{repo}/"
+        return match.group(1)
     return "[デプロイ完了: URL取得失敗]"
 
 
@@ -114,7 +92,7 @@ async def run_task(content: str, channel: discord.TextChannel):
             return
 
         # Attempt GitHub Pages deploy
-        deploy_result = await _deploy_pages()
+        deploy_result = await _deploy_via_script()
         if deploy_result:
             await channel.send(f"✅ 完了\n🌐 {deploy_result}")
         else:
