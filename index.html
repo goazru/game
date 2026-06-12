@@ -3,75 +3,457 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>クリックゲーム</title>
+<title>にゃんこストレッチ</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    background: #1a1a2e;
-    color: #eee;
-    font-family: 'Segoe UI', sans-serif;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    min-height: 100vh;
-    gap: 1.5rem;
-  }
-  h1 { font-size: 2rem; color: #e94560; letter-spacing: 2px; }
-  #score { font-size: 3rem; font-weight: bold; color: #0f3460; text-shadow: 0 0 20px #e94560; }
-  #btn {
-    width: 160px;
-    height: 160px;
-    border-radius: 50%;
-    background: radial-gradient(circle at 35% 35%, #e94560, #0f3460);
-    border: none;
-    cursor: pointer;
-    font-size: 1.2rem;
-    color: #fff;
-    box-shadow: 0 0 30px #e9456066;
-    transition: transform 0.08s, box-shadow 0.08s;
-    user-select: none;
-  }
-  #btn:active { transform: scale(0.92); box-shadow: 0 0 10px #e9456033; }
-  #cps { font-size: 1rem; color: #aaa; }
-  #reset {
-    background: none;
-    border: 1px solid #e94560;
-    color: #e94560;
-    padding: 6px 18px;
-    border-radius: 20px;
-    cursor: pointer;
-    font-size: 0.9rem;
-  }
-  #reset:hover { background: #e9456022; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: #0d0d1a;
+  color: #fff;
+  font-family: 'Segoe UI', sans-serif;
+  overflow: hidden;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  user-select: none;
+  cursor: pointer;
+}
+
+#fx {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+  z-index: 100;
+}
+
+#flash {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 50;
+  opacity: 0;
+}
+
+#header {
+  padding: 14px 20px 6px;
+  text-align: center;
+  z-index: 10;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  align-items: center;
+}
+
+#catCount {
+  font-size: 1.4rem;
+  font-weight: bold;
+  color: #ffd700;
+  text-shadow: 0 0 12px #ffd70088;
+  transition: transform 0.15s;
+}
+
+#combo {
+  font-size: 0.95rem;
+  color: #ff9de2;
+  min-width: 80px;
+  text-align: right;
+}
+
+#catArea {
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 16px 4px;
+  width: 100%;
+  overflow: hidden;
+}
+
+.cat-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+  transition: transform 0.1s ease-out;
+}
+
+.cat-svg {
+  transition: filter 0.1s;
+  transform-origin: bottom center;
+  display: block;
+}
+
+#bar-area {
+  width: 100%;
+  max-width: 440px;
+  padding: 8px 20px;
+}
+
+#bar-track {
+  width: 100%;
+  height: 14px;
+  background: #1a1a2e;
+  border-radius: 7px;
+  overflow: hidden;
+  border: 1px solid #333;
+  position: relative;
+}
+
+#bar-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #ff6b9d, #ffd700);
+  border-radius: 7px;
+  box-shadow: 0 0 10px #ff6b9d;
+  transition: width 0.08s;
+  position: relative;
+}
+
+#bar-fill::after {
+  content: '';
+  position: absolute;
+  right: 0; top: 0; bottom: 0;
+  width: 6px;
+  background: white;
+  opacity: 0.6;
+  border-radius: 3px;
+  filter: blur(2px);
+}
+
+#bar-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  color: #888;
+  margin-bottom: 5px;
+}
+
+#hint {
+  padding: 6px;
+  text-align: center;
+  font-size: 0.75rem;
+  color: #444;
+}
 </style>
 </head>
 <body>
-<h1>CLICK!</h1>
-<div id="score">0</div>
-<button id="btn" onclick="click_()">クリック</button>
-<div id="cps">CPS: 0.0</div>
-<button id="reset" onclick="reset_()">リセット</button>
+
+<canvas id="fx"></canvas>
+<div id="flash"></div>
+
+<div id="header">
+  <div id="catCount">🐱 × 1</div>
+  <div id="combo"></div>
+</div>
+
+<div id="catArea"></div>
+
+<div id="bar-area">
+  <div id="bar-label">
+    <span>のびのび度</span><span id="pct">0%</span>
+  </div>
+  <div id="bar-track"><div id="bar-fill"></div></div>
+</div>
+<div id="hint">クリックで猫を伸ばそう！</div>
+
 <script>
-  let count = 0, clicks = [], start = Date.now();
-  const scoreEl = document.getElementById('score');
-  const cpsEl = document.getElementById('cps');
+const canvas = document.getElementById('fx');
+const ctx = canvas.getContext('2d');
+function resize() { canvas.width = innerWidth; canvas.height = innerHeight; }
+resize();
+window.addEventListener('resize', () => { resize(); rebuildCats(); });
 
-  function click_() {
-    count++;
-    scoreEl.textContent = count.toLocaleString();
-    clicks.push(Date.now());
-    const now = Date.now();
-    clicks = clicks.filter(t => now - t < 1000);
-    cpsEl.textContent = `CPS: ${clicks.length}`;
+// ---- State ----
+let catCount = 1;
+let stretch = 0; // 0..1
+let clicks = 0;
+const CLICKS_MAX = 18;
+let overflowing = false;
+let comboTimer = null;
+let comboVal = 0;
+
+// ---- Cat colors ----
+const COLORS = [
+  ['#ffb3c6','#e8829a'],['#ffd9a0','#e8b060'],['#fff4a0','#d4c040'],
+  ['#b8f0c0','#70c87a'],['#a8d8ff','#60a0e0'],['#dbb8ff','#a060e0'],
+  ['#ffb8f0','#e060b8'],['#b8fff0','#50c0a0'],['#ffeec0','#e0c050'],
+  ['#ffcdb2','#e09870']
+];
+
+function cat(idx) {
+  const [fill, dark] = COLORS[idx % COLORS.length];
+  const light = lighten(fill, 0.18);
+  const ns = 'http://www.w3.org/2000/svg';
+  const s = document.createElementNS(ns, 'svg');
+  s.setAttribute('viewBox','0 0 80 130');
+  s.setAttribute('width','70');
+  s.setAttribute('height','117');
+  s.classList.add('cat-svg');
+  s.innerHTML = `
+    <path d="M52,118 Q78,96 70,72 Q63,54 56,66 Q52,74 58,84 Q63,94 48,112 Z" fill="${dark}"/>
+    <ellipse cx="38" cy="90" rx="25" ry="30" fill="${fill}"/>
+    <circle cx="38" cy="46" r="21" fill="${fill}"/>
+    <polygon points="18,32 12,10 30,26" fill="${fill}"/>
+    <polygon points="19,30 15,15 28,25" fill="${dark}"/>
+    <polygon points="58,32 64,10 46,26" fill="${fill}"/>
+    <polygon points="57,30 61,15 48,25" fill="${dark}"/>
+    <ellipse cx="29" cy="44" rx="4.5" ry="5" fill="#1a1a2e"/>
+    <circle cx="30.5" cy="42.5" r="1.5" fill="white"/>
+    <ellipse cx="47" cy="44" rx="4.5" ry="5" fill="#1a1a2e"/>
+    <circle cx="48.5" cy="42.5" r="1.5" fill="white"/>
+    <ellipse cx="38" cy="53" rx="3" ry="2" fill="#ffaacc"/>
+    <path d="M35,55 Q38,59 41,55" stroke="#ffaacc" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+    <line x1="12" y1="52" x2="31" y2="54" stroke="${dark}" stroke-width="0.9"/>
+    <line x1="12" y1="56" x2="31" y2="56" stroke="${dark}" stroke-width="0.9"/>
+    <line x1="64" y1="52" x2="45" y2="54" stroke="${dark}" stroke-width="0.9"/>
+    <line x1="64" y1="56" x2="45" y2="56" stroke="${dark}" stroke-width="0.9"/>
+    <ellipse cx="38" cy="96" rx="13" ry="17" fill="${light}"/>
+    <ellipse cx="24" cy="117" rx="9" ry="6" fill="${fill}"/>
+    <ellipse cx="52" cy="117" rx="9" ry="6" fill="${fill}"/>
+    <line x1="20" y1="119" x2="20" y2="121" stroke="${dark}" stroke-width="1.2" stroke-linecap="round"/>
+    <line x1="24" y1="120" x2="24" y2="122" stroke="${dark}" stroke-width="1.2" stroke-linecap="round"/>
+    <line x1="28" y1="119" x2="28" y2="121" stroke="${dark}" stroke-width="1.2" stroke-linecap="round"/>
+    <line x1="48" y1="119" x2="48" y2="121" stroke="${dark}" stroke-width="1.2" stroke-linecap="round"/>
+    <line x1="52" y1="120" x2="52" y2="122" stroke="${dark}" stroke-width="1.2" stroke-linecap="round"/>
+    <line x1="56" y1="119" x2="56" y2="121" stroke="${dark}" stroke-width="1.2" stroke-linecap="round"/>
+  `;
+  return s;
+}
+
+function lighten(hex, a) {
+  const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
+  return `rgb(${Math.min(255,r+Math.round((255-r)*a))},${Math.min(255,g+Math.round((255-g)*a))},${Math.min(255,b+Math.round((255-b)*a))})`;
+}
+
+// ---- Render ----
+const catArea = document.getElementById('catArea');
+let catEls = [];
+
+function rebuildCats() {
+  catArea.innerHTML = '';
+  catEls = [];
+  const w = Math.max(40, Math.min(70, Math.floor((innerWidth - 40) / catCount) - 10));
+  const h = Math.round(w * 117/70);
+  for (let i = 0; i < catCount; i++) {
+    const wrap = document.createElement('div');
+    wrap.className = 'cat-wrap';
+    const svg = cat(i);
+    svg.setAttribute('width', w);
+    svg.setAttribute('height', h);
+    wrap.appendChild(svg);
+    catArea.appendChild(wrap);
+    catEls.push({ wrap, svg });
+  }
+  applyStretch();
+}
+
+function applyStretch() {
+  const sy = 1 + stretch * 2.0;
+  const sx = 1 - stretch * 0.28;
+  catEls.forEach(({ svg }) => {
+    svg.style.transform = `scaleX(${sx.toFixed(3)}) scaleY(${sy.toFixed(3)})`;
+    const hue = 330 - stretch * 70;
+    const glow = 6 + stretch * 22;
+    svg.style.filter = `drop-shadow(0 3px ${glow}px hsl(${hue},90%,65%))`;
+  });
+  const pct = Math.round(stretch * 100);
+  const fill = document.getElementById('bar-fill');
+  fill.style.width = pct + '%';
+  document.getElementById('pct').textContent = pct + '%';
+  const hue = 330 - stretch * 80;
+  fill.style.background = `linear-gradient(90deg, hsl(${hue},90%,60%), hsl(${hue+50},90%,65%))`;
+  fill.style.boxShadow = `0 0 ${8+stretch*16}px hsl(${hue},90%,60%)`;
+}
+
+// ---- Particles ----
+let parts = [];
+
+class P {
+  constructor(x,y,opts={}) {
+    this.x = x; this.y = y;
+    this.life = 1;
+    this.decay = opts.decay ?? (0.012 + Math.random()*0.018);
+    const spd = opts.speed ?? (2 + Math.random()*5*(1+catCount*0.25));
+    const ang = opts.angle ?? (Math.random()*Math.PI*2);
+    this.vx = Math.cos(ang)*spd*(opts.vxMul??1);
+    this.vy = Math.sin(ang)*spd - (opts.upBias??2);
+    this.g = opts.gravity ?? 0.14;
+    this.size = opts.size ?? (4 + Math.random()*7);
+    this.hue = opts.hue ?? (Math.random()*360);
+    this.emoji = opts.emoji ?? null;
+    this.rot = Math.random()*360;
+    this.rotv = (Math.random()-.5)*12;
+  }
+  tick() {
+    this.x += this.vx; this.vy += this.g; this.y += this.vy;
+    this.life -= this.decay; this.rot += this.rotv; this.vx *= 0.98;
+  }
+  draw() {
+    ctx.save(); ctx.globalAlpha = Math.max(0,this.life);
+    if (this.emoji) {
+      ctx.font = `${this.size*2.2}px serif`;
+      ctx.fillText(this.emoji, this.x, this.y);
+    } else {
+      ctx.translate(this.x, this.y);
+      ctx.rotate(this.rot*Math.PI/180);
+      ctx.fillStyle = `hsl(${this.hue},90%,65%)`;
+      const h = this.size; const w = h * (0.3+Math.random()*0.7);
+      ctx.fillRect(-w/2,-h/2,w,h);
+    }
+    ctx.restore();
+  }
+}
+
+const EMOJIS = ['✨','⭐','💫','🌟','💥','🎉','🎊','🐱','❤️','🩷'];
+function burst(x, y, n) {
+  for (let i=0;i<n;i++) {
+    const isE = Math.random() < Math.min(0.15 + catCount*0.06, 0.7);
+    parts.push(new P(x,y,{
+      speed: 2+Math.random()*6*(1+catCount*0.2),
+      emoji: isE ? EMOJIS[Math.floor(Math.random()*EMOJIS.length)] : null,
+      size: isE ? 10+Math.random()*10 : 4+Math.random()*8
+    }));
+  }
+}
+
+// ---- Flash ----
+const flashEl = document.getElementById('flash');
+function flash(color, ms=80) {
+  flashEl.style.transition='none';
+  flashEl.style.background = color;
+  flashEl.style.opacity='0.55';
+  setTimeout(()=>{
+    flashEl.style.transition='opacity 0.3s';
+    flashEl.style.opacity='0';
+  }, ms);
+}
+
+// ---- Shake ----
+let shakeF=0, shakeM=0;
+function shake(mag, frames) { shakeM=mag; shakeF=frames; }
+
+// ---- Rainbow ----
+let rainbowT=0, rainbowEnd=0;
+function rainbow(ms=1800) { rainbowEnd=Date.now()+ms; }
+
+// ---- Starfall (high cat count) ----
+let starfallActive=false;
+function triggerStarfall(ms=2000) {
+  starfallActive=true;
+  setTimeout(()=>{ starfallActive=false; },ms);
+}
+
+// ---- Overflow ----
+async function overflow() {
+  if (overflowing) return;
+  overflowing = true;
+
+  // Effects scale with catCount
+  const n = catCount;
+  flash(n<3?'#ffccdd':n<5?'#ffee88':'#ffffff', 120);
+  shake(Math.min(3+n*2, 22), 22+n*3);
+  catEls.forEach(({wrap})=>{
+    const r = wrap.getBoundingClientRect();
+    burst(r.left+r.width/2, r.top+r.height/2, 8+n*6);
+  });
+  burst(innerWidth/2, innerHeight/2, n*10);
+
+  if (n >= 3) rainbow(1500 + n*200);
+  if (n >= 5) triggerStarfall(2000 + n*200);
+
+  // Pop catCount badge
+  const cc = document.getElementById('catCount');
+  cc.style.transform = 'scale(1.5)';
+  setTimeout(()=>{ cc.style.transform=''; },300);
+
+  await wait(280);
+  catCount++;
+  cc.textContent = `🐱 × ${catCount}`;
+  stretch = 0; clicks = 0;
+  rebuildCats();
+  burst(innerWidth/2, innerHeight/3, catCount*6);
+
+  await wait(180);
+  overflowing = false;
+}
+
+function wait(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+// ---- Click ----
+document.body.addEventListener('click', e => {
+  if (overflowing) return;
+  const n = Math.ceil(2 + catCount * 1.2);
+  burst(e.clientX, e.clientY, n);
+
+  clicks++;
+  stretch = Math.min(clicks / CLICKS_MAX, 1);
+  applyStretch();
+
+  // Bounce
+  catEls.forEach(({wrap})=>{
+    wrap.style.transform = 'translateY(-10px)';
+    setTimeout(()=>{ wrap.style.transform=''; }, 130);
+  });
+
+  // Combo
+  comboVal++;
+  clearTimeout(comboTimer);
+  comboTimer = setTimeout(()=>{ comboVal=0; document.getElementById('combo').textContent=''; }, 800);
+  if (comboVal > 3) document.getElementById('combo').textContent = `コンボ ${comboVal}!`;
+
+  if (stretch >= 1) overflow();
+});
+
+// ---- Ambient rain ----
+setInterval(()=>{
+  if (catCount < 3 && !starfallActive) return;
+  const base = starfallActive ? catCount*2 : catCount-2;
+  for (let i=0;i<Math.ceil(base*0.8);i++) {
+    parts.push(new P(Math.random()*innerWidth, -20, {
+      speed: 1, angle: Math.PI/2,
+      vxMul: 0, upBias: -1-Math.random(),
+      gravity: 0.02,
+      decay: 0.003+Math.random()*0.004,
+      emoji: EMOJIS[Math.floor(Math.random()*EMOJIS.length)],
+      size: 7+Math.random()*9
+    }));
+  }
+}, 250);
+
+// ---- Loop ----
+function loop() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if (Date.now() < rainbowEnd) {
+    rainbowT = (rainbowT+2)%360;
+    ctx.fillStyle = `hsla(${rainbowT},80%,60%,0.07)`;
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    // rainbow bar at top
+    const grad = ctx.createLinearGradient(0,0,canvas.width,0);
+    for(let i=0;i<=6;i++) grad.addColorStop(i/6,`hsla(${(rainbowT+i*60)%360},90%,60%,0.5)`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0,0,canvas.width,4);
   }
 
-  function reset_() {
-    count = 0; clicks = [];
-    scoreEl.textContent = '0';
-    cpsEl.textContent = 'CPS: 0';
+  if (shakeF > 0) {
+    const sx=(Math.random()-.5)*shakeM*2, sy=(Math.random()-.5)*shakeM*2;
+    document.body.style.transform=`translate(${sx}px,${sy}px)`;
+    shakeF--;
+    if (!shakeF) document.body.style.transform='';
   }
+
+  parts = parts.filter(p=>p.life>0);
+  parts.forEach(p=>{ p.tick(); p.draw(); });
+
+  requestAnimationFrame(loop);
+}
+
+rebuildCats();
+loop();
 </script>
 </body>
 </html>
-<!-- deploy-test -->
