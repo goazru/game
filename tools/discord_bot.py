@@ -6,11 +6,13 @@ Slash commands:
   /status         - Show current task and queue length
 """
 import asyncio
+import json
 import os
 import re
 import subprocess
 import sys
 from collections import deque
+from datetime import datetime, timezone
 from pathlib import Path
 
 import discord
@@ -19,6 +21,8 @@ from dotenv import load_dotenv
 
 REPO_ROOT = Path(__file__).parent.parent
 NOTIFY = str(REPO_ROOT / "tools" / "notify.py")
+DEPLOY_SCRIPT = str(REPO_ROOT / "tools" / "deploy.sh")
+TASK_LOG = REPO_ROOT / "logs" / "task_log.jsonl"
 load_dotenv(REPO_ROOT / ".env")
 
 TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
@@ -33,6 +37,19 @@ current_task: str | None = None
 worker_running = False
 
 
+def _log_task(content: str, exit_code: int | None, scripts: list[str] | None = None):
+    TASK_LOG.parent.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "time": datetime.now(timezone.utc).isoformat(),
+        "task": content[:200],
+        "command": ["claude", "--dangerously-skip-permissions", "-p", content],
+        "scripts": scripts or [],
+        "exit_code": exit_code,
+    }
+    with open(TASK_LOG, "a") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
 def _notify(msg: str):
     subprocess.run(
         [sys.executable, NOTIFY, msg],
@@ -42,10 +59,9 @@ def _notify(msg: str):
 
 
 async def _deploy_via_script() -> str | None:
-    deploy_script = REPO_ROOT / "tools" / "deploy.sh"
-    print(f"[deploy] start: {deploy_script}", flush=True)
+    print(f"[deploy] start: {DEPLOY_SCRIPT}", flush=True)
     proc = await asyncio.create_subprocess_exec(
-        "bash", str(deploy_script),
+        "bash", DEPLOY_SCRIPT,
         cwd=REPO_ROOT,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -54,10 +70,10 @@ async def _deploy_via_script() -> str | None:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=360)
     except asyncio.TimeoutError:
         proc.kill()
-        print(f"[deploy] timeout: {deploy_script}", flush=True)
+        print(f"[deploy] timeout: {DEPLOY_SCRIPT}", flush=True)
         return "[デプロイタイムアウト]"
     output = stdout.decode() + stderr.decode()
-    print(f"[deploy] exit={proc.returncode} script={deploy_script}\n{output[:500]}", flush=True)
+    print(f"[deploy] exit={proc.returncode} script={DEPLOY_SCRIPT}\n{output[:500]}", flush=True)
     if proc.returncode != 0:
         return f"[デプロイ失敗] {output[:300]}"
     match = re.search(r"URL:\s*(https://\S+)", output)
@@ -81,6 +97,7 @@ async def run_task(content: str, channel: discord.TextChannel):
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=7200)
         except asyncio.TimeoutError:
             proc.kill()
+            _log_task(content, None)
             await channel.send("⏰ タイムアウト(2時間)でタスクを中断しました")
             _notify(f"タスクタイムアウト: {content[:80]}")
             return
@@ -89,6 +106,7 @@ async def run_task(content: str, channel: discord.TextChannel):
         err_text = stderr.decode(errors="replace")
 
         if proc.returncode != 0:
+            _log_task(content, proc.returncode)
             summary = f"❌ 失敗 (code {proc.returncode})\n{err_text[:500]}"
             await channel.send(summary[:2000])
             _notify(f"タスク失敗: {content[:60]}")
@@ -96,6 +114,7 @@ async def run_task(content: str, channel: discord.TextChannel):
 
         # Attempt GitHub Pages deploy
         deploy_result = await _deploy_via_script()
+        _log_task(content, proc.returncode, [DEPLOY_SCRIPT])
         if deploy_result:
             await channel.send(f"✅ 完了\n🌐 {deploy_result}")
         else:

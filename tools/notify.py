@@ -72,7 +72,6 @@ def main():
 
     if not resp.ok:
         print(f"ERROR: Discord API {resp.status_code}: {resp.text[:200]}", file=sys.stderr)
-        sys.exit(1)
 
     sys.exit(0)
 
