@@ -29,7 +29,13 @@ cp -r "$DIST_DIR"/. "$WORKTREE_DIR/"
 cd "$WORKTREE_DIR"
 git add -A
 if git diff --cached --quiet; then
-  echo "変更なし。スキップします。"
+  # 内容変更なし。ただしリモートにブランチがなければ初回 push する
+  if ! git ls-remote --exit-code origin "$BRANCH" >/dev/null 2>&1; then
+    git push origin "$BRANCH"
+    echo "gh-pages ブランチへ push 完了（初回・内容変更なし）"
+  else
+    echo "変更なし。スキップします。"
+  fi
 else
   git commit -m "deploy: $(date '+%Y-%m-%d %H:%M:%S')"
   git push origin "$BRANCH"
