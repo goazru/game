@@ -1,0 +1,8 @@
+.env
+assets/generated/log.jsonl
+.nai_state.json
+.nai_lock
+.notify_state.json
+.venv/
+__pycache__/
+*.pyc
