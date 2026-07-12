@@ -2,1145 +2,789 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-<title>ゲートランナー</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>ゲートくぐりゲーム</title>
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-html, body {
-  width: 100%; height: 100%;
-  background: #0a0a1a;
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: #0a0015;
   display: flex;
-  align-items: center;
   justify-content: center;
+  align-items: center;
+  height: 100vh;
   overflow: hidden;
+  font-family: 'Arial Rounded MT Bold', 'Arial', sans-serif;
   touch-action: none;
-  font-family: system-ui, -apple-system, sans-serif;
 }
-#gameCanvas {
+#gameWrapper {
+  position: relative;
+  width: 390px;
+  height: 700px;
+  max-height: 100vh;
+  overflow: hidden;
+}
+canvas {
   display: block;
-  touch-action: none;
-  image-rendering: pixelated;
+  width: 100%;
+  height: 100%;
+  border-radius: 20px;
+  box-shadow: 0 0 60px #7c3aed88, 0 0 120px #4f46e522;
+}
+#ui {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  pointer-events: none;
+}
+#startScreen, #gameoverScreen, #clearScreen {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 18px;
+  background: rgba(10,0,30,0.82);
+  border-radius: 20px;
+  pointer-events: all;
+}
+#startScreen.hidden, #gameoverScreen.hidden, #clearScreen.hidden { display: none; }
+.screen-title {
+  font-size: 2.6rem;
+  font-weight: 900;
+  background: linear-gradient(90deg, #f472b6, #a78bfa, #60a5fa);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-align: center;
+  line-height: 1.2;
+}
+.screen-sub {
+  font-size: 1rem;
+  color: #c4b5fd;
+  text-align: center;
+  padding: 0 24px;
+  white-space: pre-line;
+}
+.btn {
+  margin-top: 8px;
+  padding: 16px 52px;
+  font-size: 1.3rem;
+  font-weight: 900;
+  border: none;
+  border-radius: 40px;
+  background: linear-gradient(135deg, #7c3aed, #4f46e5, #2563eb);
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 4px 24px #7c3aed88;
+  transition: transform 0.1s, box-shadow 0.1s;
+  letter-spacing: 0.05em;
+  pointer-events: all;
+}
+.btn:active { transform: scale(0.95); box-shadow: 0 2px 10px #7c3aed55; }
+.score-big {
+  font-size: 3.5rem;
+  font-weight: 900;
+  color: #fbbf24;
+  text-shadow: 0 0 20px #fbbf2499;
 }
 </style>
 </head>
 <body>
-<canvas id="gameCanvas"></canvas>
+<div id="gameWrapper">
+  <canvas id="c" width="390" height="700"></canvas>
+  <div id="ui">
+    <div id="startScreen">
+      <div class="screen-title">ゲートくぐり<br>チャレンジ!</div>
+      <div class="screen-sub">ゲートをくぐって数値を増やし<br>敵を倒そう!</div>
+      <button class="btn" id="startBtn">▶ スタート</button>
+    </div>
+    <div id="gameoverScreen" class="hidden">
+      <div class="screen-title">GAME<br>OVER</div>
+      <div class="screen-sub" id="goMsg"></div>
+      <button class="btn" id="retryBtn">もう一度</button>
+    </div>
+    <div id="clearScreen" class="hidden">
+      <div class="screen-title">クリア!</div>
+      <div class="score-big" id="clearScore"></div>
+      <div class="screen-sub" id="clearMsg"></div>
+      <button class="btn" id="nextBtn">次のステージ ▶</button>
+    </div>
+  </div>
+</div>
+
 <script>
-// ============================================================
-//  ゲートランナー  – Pure HTML5 Canvas Game
-// ============================================================
+'use strict';
 
-// ---------- Canvas & resize ----------
-const canvas = document.getElementById('gameCanvas');
+const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
+const W = 390, H = 700;
 
-const LOGICAL_W = 400;
-const LOGICAL_H = 700;
-let scale = 1;
-
-function resizeCanvas() {
-  const ww = window.innerWidth;
-  const wh = window.innerHeight;
-  scale = Math.min(ww / LOGICAL_W, wh / LOGICAL_H);
-  canvas.width  = LOGICAL_W;
-  canvas.height = LOGICAL_H;
-  canvas.style.width  = Math.floor(LOGICAL_W * scale) + 'px';
-  canvas.style.height = Math.floor(LOGICAL_H * scale) + 'px';
-}
-resizeCanvas();
-window.addEventListener('resize', resizeCanvas);
-window.addEventListener('orientationchange', () => setTimeout(resizeCanvas, 100));
-
-// ---------- Audio ----------
-let audioCtx = null;
-function ensureAudio() {
-  if (!audioCtx) {
-    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
-  }
-  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
-}
-function beep(freq, type, duration, gainVal, delay) {
-  if (!audioCtx) return;
-  try {
-    const osc = audioCtx.createOscillator();
-    const g   = audioCtx.createGain();
-    osc.connect(g); g.connect(audioCtx.destination);
-    osc.type = type || 'sine';
-    osc.frequency.setValueAtTime(freq, audioCtx.currentTime + (delay||0));
-    g.gain.setValueAtTime(gainVal || 0.15, audioCtx.currentTime + (delay||0));
-    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (delay||0) + duration);
-    osc.start(audioCtx.currentTime + (delay||0));
-    osc.stop(audioCtx.currentTime  + (delay||0) + duration);
-  } catch(e) {}
-}
-function sfxGate()    { beep(520, 'sine',   0.12, 0.2); }
-function sfxDamage()  { beep(150, 'square', 0.18, 0.25); }
-function sfxWin()     { beep(523,'sine',0.15,0.2,0); beep(659,'sine',0.15,0.2,0.15); beep(784,'sine',0.25,0.2,0.30); }
-function sfxLose()    { beep(220,'square',0.3,0.2,0); beep(180,'square',0.4,0.2,0.1); }
-function sfxBoss()    { beep(200,'sawtooth',0.4,0.2); }
-
-// ---------- Constants ----------
-const ROAD_LEFT  = 60;
-const ROAD_RIGHT = 340;
-const ROAD_W     = ROAD_RIGHT - ROAD_LEFT;
-
-const PLAYER_Y   = LOGICAL_H - 100;
-const PLAYER_BASE_R = 22;
-const PLAYER_MAX_R  = 36;
-
-const SCROLL_SPEED_BASE = 180; // px/sec logical
-const GATE_ROWS = 7;
-const GATE_ROW_SPACING = 320;
-const COURSE_LEN = GATE_ROWS * GATE_ROW_SPACING + 400; // world length past player start
-
-// ---------- State ----------
-let state = 'title'; // title | playing | boss | win | lose
+// --- ゲーム状態 ---
+let state = 'idle'; // idle | playing | gameover | clear
 let stage = 1;
-
-// player
-let player = {};
-
-// world scroll
-let worldY = 0; // how many logical px we've scrolled (increases downward)
-let scrollSpeed = 0;
-
-// entities
-let gates = [];
-let enemies = [];
-let boss = null;
-
-// particles
+let playerValue = 10;
+let playerX = W / 2;
+let targetX = W / 2;
 let particles = [];
-
-// popup texts
 let popups = [];
+let enemies = [];
+let gates = [];
+let stagePhase = 'gates'; // gates | battle
+let battleEnemyIndex = 0;
+let battleAnim = 0;
+let battleResult = null; // null | win | lose
+let frameCount = 0;
+let shakeX = 0, shakeY = 0;
+let bgHue = 260;
+let flashAlpha = 0;
+let flashColor = '#fff';
 
-// screen shake
-let shakeTime = 0;
-let shakeMag  = 0;
+// --- 定数 ---
+const PLAYER_R = 26;
+const ENEMY_R = 22;
+const GATE_W = 90, GATE_H = 44;
+const GATE_ROW_Y = [H * 0.3, H * 0.48, H * 0.63];
+const PLAYER_Y = H - 90;
+const PLAYER_SPEED = 0.16;
 
-// boss battle state
-let bossPhase = 'none'; // none|approach|attack|result
-let bossTimer = 0;
-let bossResultDelay = 0;
-
-// stars background
-let stars = [];
-function initStars() {
-  stars = [];
-  for (let i = 0; i < 80; i++) {
-    stars.push({ x: Math.random()*LOGICAL_W, y: Math.random()*LOGICAL_H, size: Math.random()*1.8+0.3, speed: Math.random()*0.4+0.2 });
-  }
-}
-initStars();
-
-// touch/mouse input
-let pointerActive = false;
-let lastPointerX  = 0;
-
-// keyboard
-let keyLeft = false;
-let keyRight = false;
-
-// ---------- Pointer Events ----------
-function pointerToCanvas(clientX) {
-  const rect = canvas.getBoundingClientRect();
-  return (clientX - rect.left) / scale;
-}
-
-canvas.addEventListener('pointerdown', e => {
-  e.preventDefault();
-  ensureAudio();
-  pointerActive = true;
-  lastPointerX = pointerToCanvas(e.clientX);
-  if (state === 'title' || state === 'win' || state === 'lose') {
-    startGame(state === 'win');
-  }
-}, { passive: false });
-
-canvas.addEventListener('pointermove', e => {
-  e.preventDefault();
-  if (!pointerActive) return;
-  const cx = pointerToCanvas(e.clientX);
-  const dx = cx - lastPointerX;
-  lastPointerX = cx;
-  if (state === 'playing') {
-    player.x = Math.max(ROAD_LEFT + player.r, Math.min(ROAD_RIGHT - player.r, player.x + dx));
-  }
-}, { passive: false });
-
-canvas.addEventListener('pointerup',   e => { e.preventDefault(); pointerActive = false; }, { passive: false });
-canvas.addEventListener('pointercancel', e => { e.preventDefault(); pointerActive = false; }, { passive: false });
-
-// ---------- Keyboard ----------
-window.addEventListener('keydown', e => {
-  if (e.key === 'ArrowLeft')  keyLeft  = true;
-  if (e.key === 'ArrowRight') keyRight = true;
-  if ((e.key === ' ' || e.key === 'Enter') && (state === 'title' || state === 'win' || state === 'lose')) {
-    ensureAudio();
-    startGame(state === 'win');
-  }
-});
-window.addEventListener('keyup', e => {
-  if (e.key === 'ArrowLeft')  keyLeft  = false;
-  if (e.key === 'ArrowRight') keyRight = false;
-});
-
-// ---------- Utility ----------
-function randInt(a, b) { return Math.floor(Math.random() * (b - a + 1)) + a; }
-function clamp(v, mn, mx) { return Math.max(mn, Math.min(mx, v)); }
-function lerp(a, b, t) { return a + (b - a) * t; }
-
-// Apply a gate operator to a value
-function applyOp(val, op) {
-  if (op.startsWith('+')) return val + parseInt(op.slice(1));
-  if (op.startsWith('−') || op.startsWith('-')) return Math.max(0, val - parseInt(op.slice(1)));
-  if (op === '×2') return val * 2;
-  if (op === '×3') return val * 3;
-  if (op === '÷2') return Math.max(0, Math.floor(val / 2));
-  return val;
+// --- ステージ設定 ---
+function getStageConfig(s) {
+  return {
+    enemyCount: 2 + Math.min(s, 4),
+    enemyValueMin: 5 + s * 3,
+    enemyValueMax: 12 + s * 6,
+    gateRows: Math.min(3, 1 + Math.floor(s / 2)),
+    gateCols: 3,
+    enemySpeed: 0.3 + s * 0.08,
+    startValue: 10,
+  };
 }
 
-// Evaluate "score" of an operator applied to v (higher=better)
-function opScore(val, op) {
-  return applyOp(val, op) - val;
-}
+// --- ゲート演算定義 ---
+const GATE_GOOD = [
+  { label: '+5',  op: v => v + 5,   color: '#34d399' },
+  { label: '+10', op: v => v + 10,  color: '#22c55e' },
+  { label: '+20', op: v => v + 20,  color: '#16a34a' },
+  { label: 'x2',  op: v => v * 2,   color: '#60a5fa' },
+  { label: 'x3',  op: v => v * 3,   color: '#3b82f6' },
+  { label: '+30', op: v => v + 30,  color: '#a78bfa' },
+  { label: 'x5',  op: v => v * 5,   color: '#818cf8' },
+];
+const GATE_BAD = [
+  { label: '-5',  op: v => Math.max(1, v - 5),             color: '#f87171' },
+  { label: '/2',  op: v => Math.max(1, Math.floor(v / 2)), color: '#fb923c' },
+  { label: '/3',  op: v => Math.max(1, Math.floor(v / 3)), color: '#f97316' },
+  { label: '-10', op: v => Math.max(1, v - 10),            color: '#ef4444' },
+];
 
-// ---------- Stage generation ----------
-function generateStage(stageNum) {
-  gates   = [];
-  enemies = [];
-  particles = [];
-  popups  = [];
-
-  // Gate rows: worldY positions (world coord, larger = further ahead)
-  // World Y 0 = player start position. Gates appear ABOVE the player on-screen
-  // i.e. at larger world Y values (further along the course).
-
-  const opPool = ['+5','+8','+10','+15','+20','×2','×3','−5','−8','÷2'];
-  function randomGoodOp() {
-    const good = ['+5','+8','+10','+15','+20','×2','×3'];
-    return good[randInt(0, good.length-1)];
-  }
-  function randomBadOp() {
-    const bad = ['−5','−8','−10','÷2'];
-    return bad[randInt(0, bad.length-1)];
-  }
-  function randomOp() {
-    return opPool[randInt(0, opPool.length-1)];
-  }
-
-  for (let row = 0; row < GATE_ROWS; row++) {
-    const worldPos = 400 + row * GATE_ROW_SPACING; // world units ahead of start
-    // Decide gate type for this row
-    const kind = randInt(0, 2);
-    let leftOp, rightOp;
-    if (kind === 0) {
-      // one good, one bad
-      leftOp  = (Math.random() < 0.5) ? randomGoodOp() : randomBadOp();
-      rightOp = (leftOp[0] === '+' || leftOp[0] === '×') ? randomBadOp() : randomGoodOp();
-    } else if (kind === 1) {
-      // both good, but different magnitudes
-      leftOp  = randomGoodOp();
-      rightOp = randomGoodOp();
+function pickGateOps(cols, s) {
+  const result = [];
+  for (let i = 0; i < cols; i++) {
+    // ステージが上がると不利ゲートが1つ混入しやすくなる
+    const useBad = (s > 1) && (i === Math.floor(cols / 2));
+    if (useBad) {
+      result.push(GATE_BAD[Math.floor(Math.random() * GATE_BAD.length)]);
     } else {
-      // one random, one slightly better
-      leftOp  = randomOp();
-      rightOp = randomOp();
+      result.push(GATE_GOOD[Math.floor(Math.random() * GATE_GOOD.length)]);
     }
-
-    // Gate positions: split road into left and right halves
-    const midX = (ROAD_LEFT + ROAD_RIGHT) / 2;
-    const gateW = (ROAD_W / 2) - 10;
-    const gateH = 55;
-
-    gates.push({
-      id: row,
-      worldY: worldPos,
-      leftGate:  { x: ROAD_LEFT + 5,    w: gateW, op: leftOp  },
-      rightGate: { x: midX + 5,          w: gateW, op: rightOp },
-      gateH: gateH,
-      triggered: false,
-    });
   }
+  return result;
+}
 
-  // Enemies: 3+stageNum enemies scattered between gates
-  const enemyCount = 2 + Math.min(stageNum, 5);
-  for (let i = 0; i < enemyCount; i++) {
-    const worldPos = 200 + randInt(0, GATE_ROWS-1) * GATE_ROW_SPACING + randInt(80, GATE_ROW_SPACING - 80);
-    const val = randInt(3 + stageNum, 8 + stageNum * 2);
+function initStage() {
+  const cfg = getStageConfig(stage);
+  playerValue = cfg.startValue;
+  playerX = W / 2;
+  targetX = W / 2;
+  particles = [];
+  popups = [];
+  enemies = [];
+  gates = [];
+  stagePhase = 'gates';
+  battleEnemyIndex = 0;
+  battleAnim = 0;
+  battleResult = null;
+  frameCount = 0;
+  shakeX = 0; shakeY = 0;
+  flashAlpha = 0;
+
+  // 敵生成
+  for (let i = 0; i < cfg.enemyCount; i++) {
+    const v = cfg.enemyValueMin + Math.floor(Math.random() * (cfg.enemyValueMax - cfg.enemyValueMin));
+    const hue = Math.random() * 40 + 340;
     enemies.push({
-      x: randInt(ROAD_LEFT + 20, ROAD_RIGHT - 20),
-      worldY: worldPos,
-      r: 16,
-      val: val,
+      x: 55 + (i / Math.max(cfg.enemyCount - 1, 1)) * (W - 110),
+      y: -60 - i * 50,
+      vy: cfg.enemySpeed + Math.random() * 0.1,
+      value: v,
+      r: ENEMY_R,
+      color: `hsl(${hue},90%,60%)`,
       alive: true,
-      phase: Math.random() * Math.PI * 2,
-      baseX: randInt(ROAD_LEFT + 20, ROAD_RIGHT - 20),
+      settled: false,
+      settleY: 72 + i * 46,
+      hue,
     });
   }
 
-  // Boss
-  const bossWorldY = GATE_ROWS * GATE_ROW_SPACING + 200;
-  // Simulate best path to get best possible player value
-  let simVal = 10;
-  for (let row = 0; row < GATE_ROWS; row++) {
-    const g = gates[row];
-    const lo = applyOp(simVal, g.leftGate.op);
-    const ro = applyOp(simVal, g.rightGate.op);
-    simVal = Math.max(lo, ro);
+  // ゲート生成
+  for (let row = 0; row < cfg.gateRows; row++) {
+    const y = GATE_ROW_Y[row] !== undefined ? GATE_ROW_Y[row] : H * 0.38 + row * 120;
+    const ops = pickGateOps(cfg.gateCols, stage);
+    const totalW = cfg.gateCols * GATE_W + (cfg.gateCols - 1) * 12;
+    const startX = (W - totalW) / 2;
+    for (let col = 0; col < cfg.gateCols; col++) {
+      gates.push({
+        x: startX + col * (GATE_W + 12),
+        y: y - GATE_H / 2,
+        w: GATE_W,
+        h: GATE_H,
+        op: ops[col],
+        passed: false,
+        row,
+        glow: 0,
+      });
+    }
   }
-  const bossVal = Math.floor(clamp(simVal * 0.65, 30 + stageNum * 25, simVal - 1));
-
-  boss = {
-    x: LOGICAL_W / 2,
-    worldY: bossWorldY,
-    r: 38,
-    val: bossVal,
-    alive: true,
-    phase: 0,
-  };
-
-  // Player
-  player = {
-    x: LOGICAL_W / 2,
-    r: PLAYER_BASE_R,
-    val: 10,
-    alive: true,
-    blinkTimer: 0,
-  };
-
-  worldY = 0;
-  scrollSpeed = SCROLL_SPEED_BASE + (stageNum - 1) * 15;
-  bossPhase = 'none';
-  bossTimer = 0;
 }
 
-// ---------- Start / restart ----------
-function startGame(nextStage) {
-  // state is still the old state here, use nextStage flag for intent
-  if (nextStage) {
-    // coming from win: advance stage
-    stage++;
-  } else if (state === 'title') {
-    // fresh start
-    stage = 1;
-  }
-  // lose: keep current stage (do nothing)
-  generateStage(stage);
-  state = 'playing';
-}
-
-// ---------- Particle system ----------
-function spawnParticles(x, y, color, count, speed) {
+// --- パーティクル ---
+function spawnParticles(x, y, color, count) {
+  count = count || 14;
   for (let i = 0; i < count; i++) {
-    const angle = (Math.PI * 2 * i / count) + Math.random() * 0.5;
-    const spd   = speed * (0.5 + Math.random() * 0.8);
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 2 + Math.random() * 5;
     particles.push({
       x, y,
-      vx: Math.cos(angle) * spd,
-      vy: Math.sin(angle) * spd,
-      life: 1.0,
-      decay: 0.03 + Math.random() * 0.04,
-      r:   2 + Math.random() * 4,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 1,
+      life: 1,
+      decay: 0.025 + Math.random() * 0.025,
+      r: 3 + Math.random() * 5,
       color,
     });
   }
 }
-function spawnConfetti(count) {
-  for (let i = 0; i < count; i++) {
-    particles.push({
-      x: Math.random() * LOGICAL_W,
-      y: -10,
-      vx: (Math.random() - 0.5) * 80,
-      vy: 60 + Math.random() * 80,
-      life: 1.0,
-      decay: 0.004 + Math.random() * 0.005,
-      r: 4,
-      color: `hsl(${randInt(0,360)},90%,60%)`,
-      isRect: true,
-      rot: Math.random() * Math.PI,
-      rotV: (Math.random()-0.5)*4,
-    });
-  }
+
+function spawnPopup(x, y, text, color) {
+  popups.push({ x, y, text, color, life: 1, vy: -1.4 });
 }
-function updateParticles(dt) {
-  for (let i = particles.length - 1; i >= 0; i--) {
+
+// --- 入力 ---
+function getCanvasX(clientX) {
+  const rect = canvas.getBoundingClientRect();
+  return (clientX - rect.left) * (W / rect.width);
+}
+
+canvas.addEventListener('mousemove', function(e) {
+  if (state !== 'playing' || stagePhase !== 'gates') return;
+  targetX = getCanvasX(e.clientX);
+});
+canvas.addEventListener('touchmove', function(e) {
+  e.preventDefault();
+  if (state !== 'playing' || stagePhase !== 'gates') return;
+  targetX = getCanvasX(e.touches[0].clientX);
+}, { passive: false });
+canvas.addEventListener('mousedown', function(e) {
+  if (state !== 'playing' || stagePhase !== 'gates') return;
+  targetX = getCanvasX(e.clientX);
+});
+canvas.addEventListener('touchstart', function(e) {
+  e.preventDefault();
+  if (state !== 'playing' || stagePhase !== 'gates') return;
+  targetX = getCanvasX(e.touches[0].clientX);
+}, { passive: false });
+
+// ボタン
+document.getElementById('startBtn').onclick = function() {
+  stage = 1;
+  document.getElementById('startScreen').classList.add('hidden');
+  startGame();
+};
+document.getElementById('retryBtn').onclick = function() {
+  stage = 1;
+  document.getElementById('gameoverScreen').classList.add('hidden');
+  startGame();
+};
+document.getElementById('nextBtn').onclick = function() {
+  stage++;
+  document.getElementById('clearScreen').classList.add('hidden');
+  startGame();
+};
+
+function startGame() {
+  state = 'playing';
+  initStage();
+  bgHue = 260;
+}
+
+// --- 描画ユーティリティ ---
+function drawRoundRect(x, y, w, h, r, fill, stroke, sw) {
+  sw = sw || 2;
+  ctx.beginPath();
+  if (ctx.roundRect) {
+    ctx.roundRect(x, y, w, h, r);
+  } else {
+    // フォールバック
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+  }
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = sw; ctx.stroke(); }
+}
+
+function drawCircleGrad(x, y, r, c1, c2) {
+  const g = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, r * 0.1, x, y, r);
+  g.addColorStop(0, c1);
+  g.addColorStop(1, c2);
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = g;
+  ctx.fill();
+}
+
+// --- 更新 ---
+function update() {
+  frameCount++;
+  bgHue = (bgHue + 0.2) % 360;
+  shakeX *= 0.82;
+  shakeY *= 0.82;
+  if (Math.abs(shakeX) < 0.1) shakeX = 0;
+  if (Math.abs(shakeY) < 0.1) shakeY = 0;
+  flashAlpha *= 0.88;
+
+  // パーティクル更新
+  for (let i = 0; i < particles.length; i++) {
     const p = particles[i];
-    p.x += p.vx * dt;
-    p.y += p.vy * dt;
-    p.vy += 120 * dt; // gravity
+    p.x += p.vx; p.y += p.vy;
+    p.vy += 0.12;
+    p.vx *= 0.97;
     p.life -= p.decay;
-    if (p.rot !== undefined) p.rot += (p.rotV || 0) * dt;
-    if (p.life <= 0) particles.splice(i, 1);
   }
-}
-function drawParticles() {
-  for (const p of particles) {
-    ctx.save();
-    ctx.globalAlpha = Math.max(0, p.life);
-    ctx.fillStyle = p.color;
-    ctx.translate(p.x, p.y);
-    if (p.isRect) {
-      ctx.rotate(p.rot || 0);
-      ctx.fillRect(-p.r, -p.r/2, p.r*2, p.r);
-    } else {
-      ctx.beginPath();
-      ctx.arc(0, 0, p.r, 0, Math.PI*2);
-      ctx.fill();
-    }
-    ctx.restore();
+  particles = particles.filter(function(p) { return p.life > 0; });
+
+  // ポップアップ更新
+  for (let i = 0; i < popups.length; i++) {
+    popups[i].y += popups[i].vy;
+    popups[i].life -= 0.02;
+  }
+  popups = popups.filter(function(p) { return p.life > 0; });
+
+  if (stagePhase === 'gates') {
+    updateGatesPhase();
+  } else if (stagePhase === 'battle') {
+    updateBattlePhase();
   }
 }
 
-// ---------- Popup texts ----------
-function spawnPopup(x, y, text, color) {
-  popups.push({ x, y, text, color: color||'#fff', life: 1.0, vy: -60 });
-}
-function updatePopups(dt) {
-  for (let i = popups.length - 1; i >= 0; i--) {
-    const p = popups[i];
-    p.y += p.vy * dt;
-    p.life -= 1.5 * dt;
-    if (p.life <= 0) popups.splice(i, 1);
+function updateGatesPhase() {
+  // プレイヤー移動
+  playerX += (targetX - playerX) * PLAYER_SPEED;
+  playerX = Math.max(PLAYER_R, Math.min(W - PLAYER_R, playerX));
+
+  // ゲート当たり判定（行ごとに1回）
+  for (let i = 0; i < gates.length; i++) {
+    const gate = gates[i];
+    if (gate.passed) continue;
+    const py = PLAYER_Y;
+    if (py + PLAYER_R >= gate.y && py - PLAYER_R <= gate.y + gate.h) {
+      if (playerX >= gate.x && playerX <= gate.x + gate.w) {
+        // 同行のゲートをすべてpassed
+        for (let j = 0; j < gates.length; j++) {
+          if (gates[j].row === gate.row) gates[j].passed = true;
+        }
+        const oldVal = playerValue;
+        playerValue = gate.op.op(playerValue);
+        const diff = playerValue - oldVal;
+        const sign = diff >= 0 ? '+' : '';
+        spawnParticles(playerX, py, gate.op.color, 20);
+        spawnPopup(playerX, py - 40, sign + diff, gate.op.color);
+        gate.glow = 1;
+        flashAlpha = 0.22;
+        flashColor = gate.op.color;
+        break;
+      }
+    }
+  }
+
+  // 敵降下
+  let allSettled = true;
+  for (let i = 0; i < enemies.length; i++) {
+    const e = enemies[i];
+    if (!e.alive || e.settled) continue;
+    e.y += e.vy;
+    if (e.y >= e.settleY) {
+      e.y = e.settleY;
+      e.settled = true;
+    } else {
+      allSettled = false;
+    }
+  }
+
+  // 全ゲート行を通過 & 全敵が定位置に着いたらバトルへ
+  const totalRows = new Set(gates.map(function(g) { return g.row; })).size;
+  const rowsPassed = new Set(gates.filter(function(g) { return g.passed; }).map(function(g) { return g.row; })).size;
+
+  if (rowsPassed >= totalRows && allSettled) {
+    stagePhase = 'battle';
+    battleAnim = 0;
+    battleEnemyIndex = 0;
+    spawnParticles(W / 2, H / 2, '#fbbf24', 30);
   }
 }
-function drawPopups() {
-  for (const p of popups) {
-    ctx.save();
-    ctx.globalAlpha = Math.max(0, p.life);
+
+function updateBattlePhase() {
+  if (battleResult) return;
+  battleAnim++;
+
+  if (battleAnim === 80) {
+    const aliveEnemies = enemies.filter(function(e) { return e.alive; });
+    const e = aliveEnemies[0];
+    if (!e) {
+      // 全撃破
+      battleResult = 'win';
+      flashAlpha = 0.5;
+      flashColor = '#22c55e';
+      spawnParticles(W / 2, H / 2, '#fbbf24', 60);
+      setTimeout(function() {
+        state = 'clear';
+        document.getElementById('clearScore').textContent = playerValue;
+        document.getElementById('clearMsg').textContent = 'ステージ ' + stage + ' クリア!';
+        document.getElementById('clearScreen').classList.remove('hidden');
+      }, 1200);
+      return;
+    }
+    if (playerValue > e.value) {
+      e.alive = false;
+      spawnParticles(e.x, e.y, '#fbbf24', 25);
+      spawnPopup(e.x, e.y - 20, '撃破!', '#fbbf24');
+      shakeX = 8; shakeY = 5;
+      flashAlpha = 0.28;
+      flashColor = '#fbbf24';
+      battleAnim = 0;
+    } else {
+      battleResult = 'lose';
+      shakeX = 15; shakeY = 10;
+      flashAlpha = 0.6;
+      flashColor = '#ef4444';
+      spawnParticles(W * 0.3, H * 0.6, '#ef4444', 40);
+      setTimeout(function() {
+        state = 'gameover';
+        document.getElementById('goMsg').textContent =
+          'あなた: ' + playerValue + ' vs 敵: ' + e.value + '\nステージ ' + stage;
+        document.getElementById('gameoverScreen').classList.remove('hidden');
+      }, 1000);
+    }
+  }
+}
+
+// --- 描画 ---
+var starCache = null;
+
+function draw() {
+  ctx.save();
+  ctx.translate(Math.round(shakeX), Math.round(shakeY));
+
+  // 背景グラデ
+  const bg = ctx.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, 'hsl(' + bgHue + ',70%,8%)');
+  bg.addColorStop(0.5, 'hsl(' + ((bgHue + 40) % 360) + ',60%,12%)');
+  bg.addColorStop(1, 'hsl(' + ((bgHue + 80) % 360) + ',80%,6%)');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  drawStars();
+
+  if (state === 'playing') {
+    if (stagePhase === 'gates') {
+      drawGates();
+      drawEnemies();
+      drawPlayer();
+      drawHUD();
+    } else if (stagePhase === 'battle') {
+      drawBattle();
+    }
+  }
+
+  // パーティクル
+  for (let i = 0; i < particles.length; i++) {
+    const p = particles[i];
+    ctx.globalAlpha = p.life;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r * p.life, 0, Math.PI * 2);
     ctx.fillStyle = p.color;
-    ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-    ctx.lineWidth = 3;
-    ctx.font = 'bold 20px system-ui';
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // ポップアップ
+  for (let i = 0; i < popups.length; i++) {
+    const p = popups[i];
+    ctx.save();
+    ctx.globalAlpha = p.life;
+    ctx.font = 'bold ' + (24 + Math.round((1 - p.life) * 10)) + 'px Arial';
+    ctx.fillStyle = p.color;
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    ctx.lineWidth = 4;
     ctx.textAlign = 'center';
     ctx.strokeText(p.text, p.x, p.y);
     ctx.fillText(p.text, p.x, p.y);
     ctx.restore();
   }
-}
 
-// ---------- Player radius based on value ----------
-function playerRadius(val) {
-  return clamp(PLAYER_BASE_R + Math.log(Math.max(1, val)) * 2.5, PLAYER_BASE_R, PLAYER_MAX_R);
-}
-
-// ---------- Screen shake ----------
-function triggerShake(mag, dur) {
-  shakeMag  = mag;
-  shakeTime = dur;
-}
-
-// ---------- Update ----------
-let lastTime = null;
-function update(ts) {
-  if (lastTime === null) lastTime = ts;
-  let dt = Math.min((ts - lastTime) / 1000, 0.05);
-  lastTime = ts;
-
-  updateParticles(dt);
-  updatePopups(dt);
-  if (shakeTime > 0) shakeTime -= dt;
-
-  // Update star positions
-  for (const s of stars) {
-    s.y += s.speed * scrollSpeed * dt * 0.25;
-    if (s.y > LOGICAL_H) s.y -= LOGICAL_H;
-  }
-
-  if (state === 'playing') {
-    updatePlaying(dt);
-  } else if (state === 'boss') {
-    updateBoss(dt);
-  }
-}
-
-function updatePlaying(dt) {
-  // Keyboard movement
-  const KB_SPEED = 220;
-  if (keyLeft)  player.x -= KB_SPEED * dt;
-  if (keyRight) player.x += KB_SPEED * dt;
-  player.x = clamp(player.x, ROAD_LEFT + player.r, ROAD_RIGHT - player.r);
-
-  player.r = playerRadius(player.val);
-
-  // Scroll world
-  worldY += scrollSpeed * dt;
-
-  // Convert world coords to screen coords
-  // screen_y = PLAYER_Y - (worldY_obj - worldY)
-  // An object at worldY_obj=0 starts above screen; at worldY_obj == worldY it's at PLAYER_Y
-
-  // Check if boss reached screen (when boss screen y <= PLAYER_Y - 60)
-  if (boss && boss.alive) {
-    const bossScreenY = worldToScreen(boss.worldY);
-    if (bossScreenY <= PLAYER_Y + 20) {
-      // Enter boss battle
-      state = 'boss';
-      bossPhase = 'approach';
-      bossTimer = 0;
-      sfxBoss();
-      return;
-    }
-  }
-
-  // Gate collision
-  for (const row of gates) {
-    if (row.triggered) continue;
-    const rowScreenY = worldToScreen(row.worldY);
-    // Check if player overlaps gate vertically (gate occupies rowScreenY to rowScreenY+gateH)
-    if (rowScreenY > PLAYER_Y + player.r) continue;
-    if (rowScreenY + row.gateH < PLAYER_Y - player.r) continue;
-
-    // Check left gate
-    const lg = row.leftGate;
-    const lMidX = lg.x + lg.w / 2;
-    if (Math.abs(player.x - lMidX) < lg.w / 2 + player.r * 0.5) {
-      triggerGate(row, lg, rowScreenY);
-      continue;
-    }
-    // Check right gate
-    const rg = row.rightGate;
-    const rMidX = rg.x + rg.w / 2;
-    if (Math.abs(player.x - rMidX) < rg.w / 2 + player.r * 0.5) {
-      triggerGate(row, rg, rowScreenY);
-    }
-  }
-
-  // Enemy collision
-  for (const e of enemies) {
-    if (!e.alive) continue;
-    const eScreenY = worldToScreen(e.worldY);
-    // Enemy sway
-    e.phase += dt * 1.5;
-    e.x = e.baseX + Math.sin(e.phase) * 30;
-    e.x = clamp(e.x, ROAD_LEFT + e.r, ROAD_RIGHT - e.r);
-
-    const dx = player.x - e.x;
-    const dy = PLAYER_Y - eScreenY;
-    const dist = Math.sqrt(dx*dx + dy*dy);
-    if (dist < player.r + e.r - 4) {
-      // Collision
-      const dmg = e.val;
-      const before = player.val;
-      player.val = Math.max(0, player.val - dmg);
-      e.alive = false;
-      spawnParticles(e.x, eScreenY, '#ff4444', 12, 100);
-      spawnPopup(player.x, PLAYER_Y - 40, `-${dmg}`, '#ff6666');
-      triggerShake(4, 0.2);
-      sfxDamage();
-    }
-  }
-}
-
-function triggerGate(row, gate, screenY) {
-  row.triggered = true;
-  const before = player.val;
-  player.val = Math.max(0, applyOp(player.val, gate.op));
-  const diff = player.val - before;
-  const color = diff >= 0 ? '#88ffaa' : '#ff8888';
-  const label = diff >= 0 ? `+${diff}` : `${diff}`;
-  spawnPopup(player.x, PLAYER_Y - 50, label + '!', color);
-  spawnParticles(player.x, PLAYER_Y, diff >= 0 ? '#66ff99' : '#ff6644', 10, 80);
-  sfxGate();
-}
-
-function worldToScreen(wY) {
-  // Objects at wY are (wY - worldY) pixels ahead of player
-  return PLAYER_Y - (wY - worldY);
-}
-
-// ---------- Boss battle ----------
-function updateBoss(dt) {
-  bossTimer += dt;
-
-  if (bossPhase === 'approach') {
-    // Scroll slows to stop
-    scrollSpeed = Math.max(0, scrollSpeed - 400 * dt);
-    // After 1s, start battle
-    if (bossTimer > 1.2) {
-      bossPhase = 'attack';
-      bossTimer = 0;
-      // Determine result
-      bossResultDelay = 1.8;
-    }
-  } else if (bossPhase === 'attack') {
-    if (bossTimer > bossResultDelay) {
-      bossPhase = 'result';
-      bossTimer = 0;
-      const win = player.val > boss.val;
-      if (win) {
-        sfxWin();
-        spawnConfetti(80);
-        bossPhase = 'winAnim';
-      } else {
-        sfxLose();
-        bossPhase = 'loseAnim';
-      }
-    }
-  } else if (bossPhase === 'winAnim') {
-    spawnConfetti(3);
-    if (bossTimer > 2.0) {
-      state = 'win';
-    }
-  } else if (bossPhase === 'loseAnim') {
-    if (bossTimer > 2.0) {
-      state = 'lose';
-    }
-  }
-}
-
-// ---------- Draw ----------
-function draw(ts) {
-  ctx.save();
-
-  // Screen shake
-  if (shakeTime > 0) {
-    const sx = (Math.random() - 0.5) * shakeMag * 2;
-    const sy = (Math.random() - 0.5) * shakeMag * 2;
-    ctx.translate(sx, sy);
-  }
-
-  drawBackground();
-  drawRoad();
-
-  if (state === 'playing' || state === 'boss') {
-    drawGates();
-    drawEnemies();
-    drawBossEntity();
-    drawPlayer();
-    drawParticles();
-    drawPopups();
-    drawHUD();
-    if (state === 'boss') drawBossUI();
-  } else if (state === 'title') {
-    drawTitle();
-  } else if (state === 'win') {
-    drawGates(); drawEnemies(); drawBossEntity(); drawPlayer();
-    drawParticles(); drawPopups();
-    drawWin();
-  } else if (state === 'lose') {
-    drawGates(); drawEnemies(); drawBossEntity(); drawPlayer();
-    drawParticles(); drawPopups();
-    drawLose();
+  // フラッシュ
+  if (flashAlpha > 0.01) {
+    ctx.globalAlpha = flashAlpha;
+    ctx.fillStyle = flashColor;
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = 1;
   }
 
   ctx.restore();
 }
 
-// ---- Background ----
-function drawBackground() {
-  const grad = ctx.createLinearGradient(0, 0, 0, LOGICAL_H);
-  grad.addColorStop(0,   '#0b0025');
-  grad.addColorStop(0.5, '#1a0040');
-  grad.addColorStop(1,   '#2d0060');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, LOGICAL_W, LOGICAL_H);
-
-  // Stars
-  for (const s of stars) {
-    ctx.globalAlpha = 0.6 + Math.random() * 0.4;
-    ctx.fillStyle = '#ffffff';
+function drawStars() {
+  if (!starCache) {
+    starCache = [];
+    for (let i = 0; i < 80; i++) {
+      starCache.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        r: Math.random() * 1.5 + 0.3,
+        b: Math.random(),
+      });
+    }
+  }
+  for (let i = 0; i < starCache.length; i++) {
+    const s = starCache[i];
+    const alpha = 0.3 + 0.5 * Math.abs(Math.sin(frameCount * 0.02 + s.b * 10));
     ctx.beginPath();
-    ctx.arc(s.x, s.y, s.size, 0, Math.PI*2);
+    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,' + alpha + ')';
     ctx.fill();
   }
-  ctx.globalAlpha = 1;
 }
 
-// ---- Road ----
-function drawRoad() {
-  // Side darkness
-  ctx.fillStyle = 'rgba(0,0,0,0.4)';
-  ctx.fillRect(0, 0, ROAD_LEFT, LOGICAL_H);
-  ctx.fillRect(ROAD_RIGHT, 0, LOGICAL_W - ROAD_RIGHT, LOGICAL_H);
-
-  // Road surface
-  const rg = ctx.createLinearGradient(ROAD_LEFT, 0, ROAD_RIGHT, 0);
-  rg.addColorStop(0,   'rgba(60,40,100,0.5)');
-  rg.addColorStop(0.5, 'rgba(90,60,140,0.5)');
-  rg.addColorStop(1,   'rgba(60,40,100,0.5)');
-  ctx.fillStyle = rg;
-  ctx.fillRect(ROAD_LEFT, 0, ROAD_W, LOGICAL_H);
-
-  // Road edge lines
-  ctx.strokeStyle = 'rgba(180,140,255,0.35)';
-  ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(ROAD_LEFT, 0); ctx.lineTo(ROAD_LEFT, LOGICAL_H); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(ROAD_RIGHT, 0); ctx.lineTo(ROAD_RIGHT, LOGICAL_H); ctx.stroke();
-
-  // Dashed center line (moving with world)
-  const dashLen = 30;
-  const gapLen  = 20;
-  const period  = dashLen + gapLen;
-  const offset  = worldY % period;
-  ctx.strokeStyle = 'rgba(200,160,255,0.25)';
-  ctx.lineWidth = 2;
-  ctx.setLineDash([dashLen, gapLen]);
-  ctx.lineDashOffset = -offset;
-  ctx.beginPath();
-  ctx.moveTo(LOGICAL_W/2, 0); ctx.lineTo(LOGICAL_W/2, LOGICAL_H);
-  ctx.stroke();
-  ctx.setLineDash([]);
-}
-
-// ---- Gate color by operator ----
-function gateColor(op) {
-  if (op.startsWith('+') || op.startsWith('×')) return { bg: 'rgba(30,100,220,0.55)', border: '#66aaff', text: '#ffffff' };
-  if (op === '−5' || op === '−8' || op === '−10' || op.startsWith('-') || op === '÷2') return { bg: 'rgba(200,30,30,0.55)', border: '#ff6666', text: '#ffffff' };
-  return { bg: 'rgba(80,180,80,0.55)', border: '#88ff88', text: '#ffffff' };
-}
-
-// ---- Draw Gates ----
-function drawGates() {
-  for (const row of gates) {
-    const sy = worldToScreen(row.worldY);
-    if (sy > LOGICAL_H + 10 || sy + row.gateH < -10) continue;
-
-    drawSingleGate(row.leftGate, sy, row.gateH, row.triggered);
-    drawSingleGate(row.rightGate, sy, row.gateH, row.triggered);
-  }
-}
-
-function drawSingleGate(g, sy, gh, triggered) {
-  const c = gateColor(g.op);
-  ctx.save();
-  ctx.globalAlpha = triggered ? 0.3 : 0.9;
-
-  // Gate body
-  ctx.fillStyle = c.bg;
-  roundRect(ctx, g.x, sy, g.w, gh, 10);
-  ctx.fill();
-
-  // Gate border (glow)
-  ctx.strokeStyle = c.border;
-  ctx.lineWidth = 2.5;
-  ctx.shadowColor = c.border;
-  ctx.shadowBlur = 10;
-  roundRect(ctx, g.x, sy, g.w, gh, 10);
-  ctx.stroke();
-  ctx.shadowBlur = 0;
-
-  // Operator text
-  ctx.fillStyle = c.text;
-  ctx.font = 'bold 22px system-ui';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(g.op, g.x + g.w/2, sy + gh/2);
-
-  ctx.restore();
-}
-
-// ---- Draw Enemies ----
-function drawEnemies() {
-  for (const e of enemies) {
-    if (!e.alive) continue;
-    const sy = worldToScreen(e.worldY);
-    if (sy > LOGICAL_H + 20 || sy < -20) continue;
-    drawEnemyChar(e.x, sy, e.r, e.val, false);
-  }
-}
-
-function drawEnemyChar(x, y, r, val, isBoss) {
-  // Body
-  const grad = ctx.createRadialGradient(x - r*0.3, y - r*0.3, r*0.1, x, y, r);
-  grad.addColorStop(0, isBoss ? '#cc66ff' : '#ff4444');
-  grad.addColorStop(1, isBoss ? '#550088' : '#880000');
-  ctx.fillStyle = grad;
-  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
-
-  // Border
-  ctx.strokeStyle = isBoss ? '#ff88ff' : '#ff8888';
-  ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.stroke();
-
-  // Face
-  if (isBoss) {
-    // Skull/strong face
-    ctx.fillStyle = '#ffccff';
-    // Eyes (X shape)
-    const ey = y - r*0.15;
-    drawXEye(x - r*0.3, ey, r*0.15, ctx);
-    drawXEye(x + r*0.3, ey, r*0.15, ctx);
-    // Angry brow
-    ctx.strokeStyle = '#ffccff';
-    ctx.lineWidth = 2.5;
-    ctx.beginPath(); ctx.moveTo(x - r*0.5, ey - r*0.3); ctx.lineTo(x - r*0.1, ey - r*0.15); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(x + r*0.5, ey - r*0.3); ctx.lineTo(x + r*0.1, ey - r*0.15); ctx.stroke();
-    // Fang mouth
-    ctx.strokeStyle = '#ffccff';
-    ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(x, y + r*0.2, r*0.3, 0, Math.PI); ctx.stroke();
-    ctx.fillStyle = '#ffccff';
-    ctx.beginPath(); ctx.moveTo(x - r*0.2, y + r*0.2); ctx.lineTo(x - r*0.1, y + r*0.4); ctx.lineTo(x, y + r*0.2); ctx.fill();
-    ctx.beginPath(); ctx.moveTo(x + r*0.1, y + r*0.2); ctx.lineTo(x + r*0.2, y + r*0.4); ctx.lineTo(x + r*0.3, y + r*0.2); ctx.fill();
-  } else {
-    // Angry face
-    ctx.fillStyle = '#ffcccc';
-    const ey = y - r*0.1;
-    // Eyes
-    ctx.beginPath(); ctx.arc(x - r*0.3, ey, r*0.12, 0, Math.PI*2); ctx.fill();
-    ctx.beginPath(); ctx.arc(x + r*0.3, ey, r*0.12, 0, Math.PI*2); ctx.fill();
-    // Brow
-    ctx.strokeStyle = '#ff8888';
-    ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(x - r*0.45, ey - r*0.22); ctx.lineTo(x - r*0.15, ey - r*0.1); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(x + r*0.45, ey - r*0.22); ctx.lineTo(x + r*0.15, ey - r*0.1); ctx.stroke();
-    // Mouth (frown)
-    ctx.beginPath(); ctx.arc(x, y + r*0.25, r*0.2, Math.PI*0.1, Math.PI*0.9, true); ctx.stroke();
-  }
-
-  // Value label above
-  ctx.fillStyle = '#ffffff';
-  ctx.strokeStyle = 'rgba(0,0,0,0.7)';
-  ctx.lineWidth = 3;
-  ctx.font = `bold ${isBoss ? 22 : 14}px system-ui`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'bottom';
-  ctx.strokeText(String(val), x, y - r - 3);
-  ctx.fillText(String(val), x, y - r - 3);
-}
-
-function drawXEye(x, y, r, c) {
-  c.strokeStyle = '#ffccff';
-  c.lineWidth = 2;
-  c.beginPath(); c.moveTo(x-r, y-r); c.lineTo(x+r, y+r); c.stroke();
-  c.beginPath(); c.moveTo(x+r, y-r); c.lineTo(x-r, y+r); c.stroke();
-}
-
-// ---- Draw Boss entity ----
-function drawBossEntity() {
-  if (!boss || !boss.alive) return;
-  const sy = worldToScreen(boss.worldY);
-  if (sy > LOGICAL_H + 60 || sy < -60) return;
-
-  // Boss pulse
-  boss.phase += 0.05;
-  const pulse = 1 + Math.sin(boss.phase) * 0.04;
-
-  ctx.save();
-  ctx.translate(boss.x, sy);
-  ctx.scale(pulse, pulse);
-  ctx.translate(-boss.x, -sy);
-  drawEnemyChar(boss.x, sy, boss.r, boss.val, true);
-  ctx.restore();
-}
-
-// ---- Draw Player ----
-function drawPlayer() {
-  const x = player.x;
-  const y = PLAYER_Y;
-  const r = player.r;
-  const val = player.val;
-
-  // Shadow
-  ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.beginPath();
-  ctx.ellipse(x, y + r, r*0.8, r*0.25, 0, 0, Math.PI*2);
-  ctx.fill();
-
-  // Body gradient
-  const grad = ctx.createRadialGradient(x - r*0.3, y - r*0.3, r*0.1, x, y, r);
-  grad.addColorStop(0, '#88ccff');
-  grad.addColorStop(1, '#1155cc');
-  ctx.fillStyle = grad;
-  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
-
-  // Glow border
-  ctx.strokeStyle = '#aaddff';
-  ctx.lineWidth = 2.5;
-  ctx.shadowColor = '#66aaff';
-  ctx.shadowBlur = 12;
-  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.stroke();
-  ctx.shadowBlur = 0;
-
-  // Happy face
-  ctx.fillStyle = '#ddeeff';
-  const ey = y - r*0.1;
-  // Eyes
-  ctx.beginPath(); ctx.arc(x - r*0.3, ey, r*0.13, 0, Math.PI*2); ctx.fill();
-  ctx.beginPath(); ctx.arc(x + r*0.3, ey, r*0.13, 0, Math.PI*2); ctx.fill();
-  // Smile
-  ctx.strokeStyle = '#ddeeff';
-  ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.arc(x, y + r*0.15, r*0.28, 0.2, Math.PI - 0.2); ctx.stroke();
-
-  // Cheek blush
-  ctx.fillStyle = 'rgba(255,150,150,0.35)';
-  ctx.beginPath(); ctx.ellipse(x - r*0.55, y + r*0.1, r*0.18, r*0.12, 0, 0, Math.PI*2); ctx.fill();
-  ctx.beginPath(); ctx.ellipse(x + r*0.55, y + r*0.1, r*0.18, r*0.12, 0, 0, Math.PI*2); ctx.fill();
-
-  // Companion orbs when value is large
-  if (val >= 30) {
-    const orbs = Math.min(Math.floor(val / 30), 5);
-    for (let i = 0; i < orbs; i++) {
-      const a = (i / orbs) * Math.PI * 2 + (Date.now() / 800);
-      const ox = x + Math.cos(a) * (r + 10);
-      const oy = y + Math.sin(a) * (r + 10);
-      ctx.fillStyle = 'rgba(150,220,255,0.8)';
-      ctx.beginPath(); ctx.arc(ox, oy, 5, 0, Math.PI*2); ctx.fill();
-    }
-  }
-
-  // Value label
-  ctx.fillStyle = '#ffffff';
-  ctx.strokeStyle = 'rgba(0,0,40,0.8)';
-  ctx.lineWidth = 4;
-  ctx.font = `bold ${r > 28 ? 22 : 18}px system-ui`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'bottom';
-  ctx.strokeText(String(val), x, y - r - 4);
-  ctx.fillText(String(val), x, y - r - 4);
-}
-
-// ---- HUD ----
 function drawHUD() {
-  ctx.fillStyle = 'rgba(0,0,20,0.55)';
-  roundRect(ctx, 8, 8, LOGICAL_W - 16, 36, 8);
-  ctx.fill();
-
-  ctx.fillStyle = '#ccbbff';
-  ctx.font = 'bold 15px system-ui';
+  ctx.font = 'bold 15px Arial';
+  ctx.fillStyle = '#c4b5fd';
   ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(`STAGE ${stage}`, 20, 26);
+  ctx.fillText('STAGE ' + stage, 16, 24);
 
-  ctx.fillStyle = '#88ddff';
-  ctx.textAlign = 'right';
-  ctx.fillText(`スコア: ${player.val}`, LOGICAL_W - 20, 26);
+  ctx.font = 'bold 22px Arial';
+  ctx.textAlign = 'center';
+  ctx.shadowColor = '#fbbf24';
+  ctx.shadowBlur = 12;
+  ctx.fillStyle = '#fbbf24';
+  ctx.fillText('' + playerValue, W / 2, 27);
+  ctx.shadowBlur = 0;
 }
 
-// ---- Boss UI (during boss battle) ----
-function drawBossUI() {
-  if (bossPhase === 'none') return;
+function drawGates() {
+  for (let i = 0; i < gates.length; i++) {
+    const gate = gates[i];
+    if (gate.passed) continue;
+    gate.glow = (gate.glow || 0) * 0.92;
+    const { x, y, w, h, op } = gate;
 
-  const sy = worldToScreen(boss.worldY);
-  const playerWins = player.val > boss.val;
+    ctx.shadowColor = op.color;
+    ctx.shadowBlur = 12 + (gate.glow || 0) * 20;
 
-  if (bossPhase === 'approach') {
-    // "BOSS!" banner
-    ctx.save();
-    ctx.fillStyle = 'rgba(0,0,0,0.4)';
-    ctx.fillRect(0, LOGICAL_H/2 - 40, LOGICAL_W, 80);
-    ctx.fillStyle = '#ff88ff';
-    ctx.font = 'bold 52px system-ui';
+    // 背景グラデ
+    const gg = ctx.createLinearGradient(x, y, x, y + h);
+    gg.addColorStop(0, op.color + 'cc');
+    gg.addColorStop(1, op.color + '44');
+    drawRoundRect(x, y, w, h, 14, gg, op.color, 2.5);
+
+    ctx.shadowBlur = 0;
+    ctx.font = 'bold ' + Math.round(h * 0.54) + 'px Arial';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.shadowColor = '#ff00ff';
-    ctx.shadowBlur = 20;
-    ctx.fillText('BOSS!', LOGICAL_W/2, LOGICAL_H/2);
-    ctx.shadowBlur = 0;
-    ctx.restore();
-  } else if (bossPhase === 'attack') {
-    // Show values with VS
-    const t = Math.min(bossTimer / bossResultDelay, 1);
-    ctx.save();
-    ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    ctx.fillRect(0, LOGICAL_H/2 - 70, LOGICAL_W, 140);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(op.label, x + w / 2, y + h / 2);
+    ctx.textBaseline = 'alphabetic';
+  }
+  ctx.shadowBlur = 0;
+}
 
-    // Player value
-    ctx.fillStyle = '#88ddff';
-    ctx.font = 'bold 48px system-ui';
+function drawFace(x, y, faceR, isEvil) {
+  // 目
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(x - faceR * 0.3, y - faceR * 0.22, faceR * 0.2, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + faceR * 0.3, y - faceR * 0.22, faceR * 0.2, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = isEvil ? '#333' : '#1e40af';
+  ctx.beginPath(); ctx.arc(x - faceR * 0.28, y - faceR * 0.22, faceR * 0.1, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + faceR * 0.32, y - faceR * 0.22, faceR * 0.1, 0, Math.PI * 2); ctx.fill();
+  // 口
+  ctx.strokeStyle = isEvil ? '#333' : '#1e40af';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  if (isEvil) {
+    ctx.arc(x, y + faceR * 0.12, faceR * 0.28, 0.2, Math.PI - 0.2); // 怒り顔
+  } else {
+    ctx.arc(x, y + faceR * 0.15, faceR * 0.3, 0, Math.PI); // 笑顔
+  }
+  ctx.stroke();
+}
+
+function drawEnemies() {
+  for (let i = 0; i < enemies.length; i++) {
+    const e = enemies[i];
+    if (!e.alive) continue;
+    const bounce = Math.sin(frameCount * 0.06 + e.hue) * 3;
+    const ey = e.y + bounce;
+
+    ctx.shadowColor = e.color;
+    ctx.shadowBlur = 18;
+    drawCircleGrad(e.x, ey, e.r, 'hsl(' + e.hue + ',90%,75%)', 'hsl(' + e.hue + ',90%,45%)');
+    ctx.shadowBlur = 0;
+
+    drawFace(e.x, ey, e.r, true);
+
+    // 数値
+    ctx.font = 'bold 13px Arial';
     ctx.textAlign = 'center';
-    ctx.fillText(String(player.val), LOGICAL_W/2 - 80, LOGICAL_H/2 - 10);
+    ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+    ctx.lineWidth = 3;
+    ctx.strokeText('' + e.value, e.x, ey + e.r + 16);
+    ctx.fillStyle = '#fff';
+    ctx.fillText('' + e.value, e.x, ey + e.r + 16);
+  }
+}
+
+function drawPlayer() {
+  const py = PLAYER_Y;
+  const bounce = Math.sin(frameCount * 0.08) * 3;
+
+  // 影
+  ctx.beginPath();
+  ctx.ellipse(playerX, py + PLAYER_R + 4, PLAYER_R * 0.8, 7, 0, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fill();
+
+  ctx.shadowColor = '#60a5fa';
+  ctx.shadowBlur = 24;
+  drawCircleGrad(playerX, py + bounce, PLAYER_R, '#93c5fd', '#2563eb');
+  ctx.shadowBlur = 0;
+
+  drawFace(playerX, py + bounce, PLAYER_R, false);
+
+  // 数値
+  ctx.font = 'bold 15px Arial';
+  ctx.textAlign = 'center';
+  ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+  ctx.lineWidth = 3;
+  ctx.strokeText('' + playerValue, playerX, py + bounce + PLAYER_R + 18);
+  ctx.fillStyle = '#fbbf24';
+  ctx.fillText('' + playerValue, playerX, py + bounce + PLAYER_R + 18);
+}
+
+function drawBattle() {
+  // バトル背景オーバーレイ
+  const grad = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, W);
+  grad.addColorStop(0, 'hsla(' + bgHue + ',70%,20%,0.5)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // タイトル
+  ctx.font = 'bold 28px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#fbbf24';
+  ctx.shadowColor = '#fbbf24';
+  ctx.shadowBlur = 14;
+  ctx.fillText('BATTLE!', W / 2, 55);
+  ctx.shadowBlur = 0;
+
+  const aliveEnemies = enemies.filter(function(e) { return e.alive; });
+  const currentEnemy = aliveEnemies[0];
+
+  if (currentEnemy && !battleResult) {
+    const enemyX = W * 0.7;
+    const enemyY = H * 0.33;
+    const plX = W * 0.3;
+    const plY = H * 0.58;
+    const r = 36;
+
+    // 敵キャラ
+    ctx.shadowColor = currentEnemy.color;
+    ctx.shadowBlur = 22;
+    drawCircleGrad(enemyX, enemyY, r, 'hsl(' + currentEnemy.hue + ',90%,75%)', 'hsl(' + currentEnemy.hue + ',90%,45%)');
+    ctx.shadowBlur = 0;
+    drawFace(enemyX, enemyY, r, true);
+
+    // 敵数値
+    ctx.font = 'bold 30px Arial';
+    ctx.textAlign = 'center';
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    ctx.lineWidth = 4;
+    ctx.strokeText('' + currentEnemy.value, enemyX, enemyY + r + 28);
+    ctx.fillStyle = '#f87171';
+    ctx.fillText('' + currentEnemy.value, enemyX, enemyY + r + 28);
+
+    // プレイヤーキャラ
+    ctx.shadowColor = '#60a5fa';
+    ctx.shadowBlur = 22;
+    drawCircleGrad(plX, plY, r, '#93c5fd', '#2563eb');
+    ctx.shadowBlur = 0;
+    drawFace(plX, plY, r, false);
+
+    // プレイヤー数値
+    ctx.font = 'bold 30px Arial';
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    ctx.lineWidth = 4;
+    ctx.strokeText('' + playerValue, plX, plY + r + 28);
+    ctx.fillStyle = '#fbbf24';
+    ctx.fillText('' + playerValue, plX, plY + r + 28);
 
     // VS
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 24px system-ui';
-    ctx.fillText('VS', LOGICAL_W/2, LOGICAL_H/2 - 10);
-
-    // Boss value
-    ctx.fillStyle = '#ff88ff';
-    ctx.font = 'bold 48px system-ui';
-    ctx.fillText(String(boss.val), LOGICAL_W/2 + 80, LOGICAL_H/2 - 10);
-
-    // Attack animation: beam/charge
-    if (t > 0.5) {
-      const at = (t - 0.5) / 0.5;
-      if (playerWins) {
-        // Player shoots beam at boss
-        ctx.strokeStyle = `rgba(100,200,255,${at})`;
-        ctx.lineWidth = 4 * at;
-        ctx.beginPath();
-        ctx.moveTo(LOGICAL_W/2 - 80, LOGICAL_H/2 - 10);
-        ctx.lineTo(LOGICAL_W/2 + 80, LOGICAL_H/2 - 10);
-        ctx.stroke();
-      } else {
-        // Boss shoots beam at player
-        ctx.strokeStyle = `rgba(255,100,255,${at})`;
-        ctx.lineWidth = 4 * at;
-        ctx.beginPath();
-        ctx.moveTo(LOGICAL_W/2 + 80, LOGICAL_H/2 - 10);
-        ctx.lineTo(LOGICAL_W/2 - 80, LOGICAL_H/2 - 10);
-        ctx.stroke();
-      }
-    }
-
-    ctx.restore();
-  } else if (bossPhase === 'winAnim' || bossPhase === 'loseAnim') {
-    const isWin = bossPhase === 'winAnim';
-    ctx.save();
-    const fadeIn = Math.min(bossTimer / 0.5, 1);
-    ctx.fillStyle = isWin ? `rgba(0,20,0,${0.55 * fadeIn})` : `rgba(30,0,0,${0.65 * fadeIn})`;
-    ctx.fillRect(0, 0, LOGICAL_W, LOGICAL_H);
-    ctx.globalAlpha = fadeIn;
-    ctx.fillStyle = isWin ? '#88ffaa' : '#ff6666';
-    ctx.font = 'bold 60px system-ui';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.shadowColor = isWin ? '#00ff88' : '#ff0000';
-    ctx.shadowBlur = 25;
-    ctx.fillText(isWin ? 'YOU WIN!' : 'YOU LOSE...', LOGICAL_W/2, LOGICAL_H/2);
+    ctx.font = 'bold 44px Arial';
+    ctx.fillStyle = '#fff';
+    ctx.shadowColor = '#fff';
+    ctx.shadowBlur = 20;
+    ctx.fillText('VS', W / 2, H / 2 - 20);
     ctx.shadowBlur = 0;
-    ctx.restore();
+
+    // 残り敵数
+    ctx.font = '14px Arial';
+    ctx.fillStyle = '#c4b5fd';
+    ctx.fillText('残り ' + aliveEnemies.length + ' 体', W / 2, H - 55);
+  }
+
+  if (battleResult === 'win') {
+    ctx.font = 'bold 52px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#22c55e';
+    ctx.shadowColor = '#22c55e';
+    ctx.shadowBlur = 32;
+    ctx.fillText('WIN!', W / 2, H / 2 + 20);
+    ctx.shadowBlur = 0;
+  }
+  if (battleResult === 'lose') {
+    ctx.font = 'bold 52px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ef4444';
+    ctx.shadowColor = '#ef4444';
+    ctx.shadowBlur = 32;
+    ctx.fillText('LOSE...', W / 2, H / 2 + 20);
+    ctx.shadowBlur = 0;
   }
 }
 
-// ---- Title ----
-function drawTitle() {
-  // Background already drawn
-
-  // Title box
-  ctx.save();
-  ctx.fillStyle = 'rgba(10,0,40,0.75)';
-  roundRect(ctx, 30, 80, LOGICAL_W - 60, 520, 20);
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(150,100,255,0.6)';
-  ctx.lineWidth = 2;
-  roundRect(ctx, 30, 80, LOGICAL_W - 60, 520, 20);
-  ctx.stroke();
-
-  // Title
-  ctx.shadowColor = '#aa66ff';
-  ctx.shadowBlur = 20;
-  ctx.fillStyle = '#eeddff';
-  ctx.font = 'bold 44px system-ui';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'top';
-  ctx.fillText('ゲートランナー', LOGICAL_W/2, 110);
-  ctx.shadowBlur = 0;
-
-  // Sub
-  ctx.fillStyle = '#ccbbee';
-  ctx.font = '16px system-ui';
-  ctx.fillText('GATE RUNNER', LOGICAL_W/2, 165);
-
-  // Instruction
-  ctx.fillStyle = '#bbaadd';
-  ctx.font = 'bold 17px system-ui';
-  const lines = [
-    '左右にドラッグして移動！',
-    'ゲートで数を増やせ！',
-    '',
-    '青/緑ゲート → 数が増える',
-    '赤ゲート    → 数が減る',
-    '',
-    '敵に当たると数が減るよ',
-    'ボスより大きい数で倒せ！',
-  ];
-  let ly = 210;
-  for (const line of lines) {
-    if (line === '') { ly += 8; continue; }
-    ctx.fillText(line, LOGICAL_W/2, ly);
-    ly += 28;
-  }
-
-  // Tap to start (blinking)
-  const blink = Math.floor(Date.now() / 500) % 2 === 0;
-  if (blink) {
-    ctx.fillStyle = '#ffeeaa';
-    ctx.font = 'bold 22px system-ui';
-    ctx.fillText('タップでスタート', LOGICAL_W/2, 525);
-  }
-
-  ctx.restore();
-}
-
-// ---- Win / Lose ----
-function drawWin() {
-  ctx.save();
-  ctx.fillStyle = 'rgba(0,10,0,0.6)';
-  ctx.fillRect(0, 0, LOGICAL_W, LOGICAL_H);
-
-  ctx.fillStyle = '#88ffaa';
-  ctx.shadowColor = '#00ff88';
-  ctx.shadowBlur = 30;
-  ctx.font = 'bold 64px system-ui';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('YOU WIN!', LOGICAL_W/2, LOGICAL_H/2 - 60);
-  ctx.shadowBlur = 0;
-
-  ctx.fillStyle = '#ddffdd';
-  ctx.font = 'bold 24px system-ui';
-  ctx.fillText(`ステージ ${stage} クリア！`, LOGICAL_W/2, LOGICAL_H/2);
-
-  ctx.fillStyle = '#aaffcc';
-  ctx.font = '18px system-ui';
-  ctx.fillText(`最終スコア: ${player.val}`, LOGICAL_W/2, LOGICAL_H/2 + 40);
-
-  const blink = Math.floor(Date.now() / 600) % 2 === 0;
-  if (blink) {
-    ctx.fillStyle = '#ffeeaa';
-    ctx.font = 'bold 20px system-ui';
-    ctx.fillText('タップで次のステージへ', LOGICAL_W/2, LOGICAL_H/2 + 100);
-  }
-  ctx.restore();
-}
-
-function drawLose() {
-  ctx.save();
-  ctx.fillStyle = 'rgba(30,0,0,0.7)';
-  ctx.fillRect(0, 0, LOGICAL_W, LOGICAL_H);
-
-  ctx.fillStyle = '#ff6666';
-  ctx.shadowColor = '#ff0000';
-  ctx.shadowBlur = 25;
-  ctx.font = 'bold 60px system-ui';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('YOU LOSE...', LOGICAL_W/2, LOGICAL_H/2 - 60);
-  ctx.shadowBlur = 0;
-
-  ctx.fillStyle = '#ffbbbb';
-  ctx.font = 'bold 22px system-ui';
-  ctx.fillText(`ステージ ${stage}`, LOGICAL_W/2, LOGICAL_H/2);
-
-  ctx.fillStyle = '#ffaaaa';
-  ctx.font = '18px system-ui';
-  ctx.fillText(`スコア: ${player.val}  ボス: ${boss ? boss.val : '?'}`, LOGICAL_W/2, LOGICAL_H/2 + 40);
-
-  const blink = Math.floor(Date.now() / 600) % 2 === 0;
-  if (blink) {
-    ctx.fillStyle = '#ffeeaa';
-    ctx.font = 'bold 20px system-ui';
-    ctx.fillText('タップでリトライ', LOGICAL_W/2, LOGICAL_H/2 + 100);
-  }
-  ctx.restore();
-}
-
-// ---------- Helper: roundRect ----------
-function roundRect(c, x, y, w, h, r) {
-  c.beginPath();
-  c.moveTo(x + r, y);
-  c.lineTo(x + w - r, y);
-  c.arcTo(x + w, y, x + w, y + r, r);
-  c.lineTo(x + w, y + h - r);
-  c.arcTo(x + w, y + h, x + w - r, y + h, r);
-  c.lineTo(x + r, y + h);
-  c.arcTo(x, y + h, x, y + h - r, r);
-  c.lineTo(x, y + r);
-  c.arcTo(x, y, x + r, y, r);
-  c.closePath();
-}
-
-// ---------- Main loop ----------
-function loop(ts) {
-  update(ts);
-  draw(ts);
+// --- メインループ ---
+function loop() {
+  if (state === 'playing') update();
+  draw();
   requestAnimationFrame(loop);
 }
-requestAnimationFrame(loop);
+
+loop();
 </script>
 </body>
 </html>
