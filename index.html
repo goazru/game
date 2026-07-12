@@ -2,789 +2,903 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>ゲートくぐりゲーム</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>ゲートランナー</title>
 <style>
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body {
-  background: #0a0015;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 100vh;
-  overflow: hidden;
-  font-family: 'Arial Rounded MT Bold', 'Arial', sans-serif;
-  touch-action: none;
-}
-#gameWrapper {
-  position: relative;
-  width: 390px;
-  height: 700px;
-  max-height: 100vh;
-  overflow: hidden;
-}
-canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
-  border-radius: 20px;
-  box-shadow: 0 0 60px #7c3aed88, 0 0 120px #4f46e522;
-}
-#ui {
-  position: absolute;
-  top: 0; left: 0; right: 0; bottom: 0;
-  pointer-events: none;
-}
-#startScreen, #gameoverScreen, #clearScreen {
-  position: absolute;
-  top: 0; left: 0; right: 0; bottom: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  gap: 18px;
-  background: rgba(10,0,30,0.82);
-  border-radius: 20px;
-  pointer-events: all;
-}
-#startScreen.hidden, #gameoverScreen.hidden, #clearScreen.hidden { display: none; }
-.screen-title {
-  font-size: 2.6rem;
-  font-weight: 900;
-  background: linear-gradient(90deg, #f472b6, #a78bfa, #60a5fa);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  text-align: center;
-  line-height: 1.2;
-}
-.screen-sub {
-  font-size: 1rem;
-  color: #c4b5fd;
-  text-align: center;
-  padding: 0 24px;
-  white-space: pre-line;
-}
-.btn {
-  margin-top: 8px;
-  padding: 16px 52px;
-  font-size: 1.3rem;
-  font-weight: 900;
-  border: none;
-  border-radius: 40px;
-  background: linear-gradient(135deg, #7c3aed, #4f46e5, #2563eb);
-  color: #fff;
-  cursor: pointer;
-  box-shadow: 0 4px 24px #7c3aed88;
-  transition: transform 0.1s, box-shadow 0.1s;
-  letter-spacing: 0.05em;
-  pointer-events: all;
-}
-.btn:active { transform: scale(0.95); box-shadow: 0 2px 10px #7c3aed55; }
-.score-big {
-  font-size: 3.5rem;
-  font-weight: 900;
-  color: #fbbf24;
-  text-shadow: 0 0 20px #fbbf2499;
-}
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0010;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    touch-action: none;
+  }
+  #container { position: relative; }
+  canvas {
+    display: block;
+    touch-action: none;
+  }
 </style>
 </head>
 <body>
-<div id="gameWrapper">
-  <canvas id="c" width="390" height="700"></canvas>
-  <div id="ui">
-    <div id="startScreen">
-      <div class="screen-title">ゲートくぐり<br>チャレンジ!</div>
-      <div class="screen-sub">ゲートをくぐって数値を増やし<br>敵を倒そう!</div>
-      <button class="btn" id="startBtn">▶ スタート</button>
-    </div>
-    <div id="gameoverScreen" class="hidden">
-      <div class="screen-title">GAME<br>OVER</div>
-      <div class="screen-sub" id="goMsg"></div>
-      <button class="btn" id="retryBtn">もう一度</button>
-    </div>
-    <div id="clearScreen" class="hidden">
-      <div class="screen-title">クリア!</div>
-      <div class="score-big" id="clearScore"></div>
-      <div class="screen-sub" id="clearMsg"></div>
-      <button class="btn" id="nextBtn">次のステージ ▶</button>
-    </div>
-  </div>
+<div id="container">
+  <canvas id="gameCanvas"></canvas>
 </div>
-
 <script>
 'use strict';
 
-const canvas = document.getElementById('c');
-const ctx = canvas.getContext('2d');
-const W = 390, H = 700;
+// ======================================================
+// 定数
+// ======================================================
+const LOGICAL_W   = 400;
+const LOGICAL_H   = 700;
+const PLAYER_Y    = 578;     // プレイヤーのY座標（固定）
+const PLAYER_R    = 22;
+const ENEMY_R     = 16;
+const BOSS_R      = 38;
+const GATE_W      = 80;
+const GATE_H      = 50;
+const GATE_ROWS   = 7;
+const ROW_SPACING = 210;     // world-Yでのゲート行間隔
+const COURSE_STARTWORLD_Y = 180; // コース先頭のworld-Y
 
-// --- ゲーム状態 ---
-let state = 'idle'; // idle | playing | gameover | clear
-let stage = 1;
+// ======================================================
+// Canvas セットアップ（論理解像度固定・CSS letterbox）
+// ======================================================
+const container = document.getElementById('container');
+const canvas    = document.getElementById('gameCanvas');
+const ctx       = canvas.getContext('2d');
+canvas.width  = LOGICAL_W;
+canvas.height = LOGICAL_H;
+
+function resizeCanvas() {
+  const sx = window.innerWidth  / LOGICAL_W;
+  const sy = window.innerHeight / LOGICAL_H;
+  const sc = Math.min(sx, sy);
+  const cw = LOGICAL_W * sc;
+  const ch = LOGICAL_H * sc;
+  container.style.width  = cw + 'px';
+  container.style.height = ch + 'px';
+  canvas.style.width     = cw + 'px';
+  canvas.style.height    = ch + 'px';
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// ======================================================
+// WebAudio: ゲーム効果音（失敗しても動く）
+// ======================================================
+let audioCtx = null;
+function getAudio() {
+  if (!audioCtx) {
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+    catch(e) {}
+  }
+  return audioCtx;
+}
+function playTone(freq, type, dur, gain, delay) {
+  const ac = getAudio(); if (!ac) return;
+  try {
+    const osc = ac.createOscillator();
+    const gn  = ac.createGain();
+    osc.connect(gn); gn.connect(ac.destination);
+    osc.type = type; osc.frequency.value = freq;
+    const t0 = ac.currentTime + (delay || 0);
+    gn.gain.setValueAtTime(gain || 0.22, t0);
+    gn.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    osc.start(t0); osc.stop(t0 + dur);
+  } catch(e) {}
+}
+// ゲート通過: ポン
+function sfxGate(good) {
+  playTone(good ? 660 : 280, 'sine', 0.12, 0.22, 0);
+}
+// ダメージ: ブブブ
+function sfxDamage() {
+  playTone(130, 'sawtooth', 0.18, 0.28, 0);
+  playTone(90,  'sawtooth', 0.18, 0.28, 0.07);
+}
+// ボス登場: 重い
+function sfxBoss() {
+  playTone(200, 'square', 0.10, 0.18, 0);
+  playTone(170, 'square', 0.12, 0.18, 0.13);
+  playTone(140, 'square', 0.18, 0.18, 0.28);
+}
+// 勝利ファンファーレ
+function sfxWin() {
+  playTone(523,  'sine', 0.12, 0.28, 0);
+  playTone(659,  'sine', 0.12, 0.28, 0.14);
+  playTone(784,  'sine', 0.22, 0.28, 0.28);
+  playTone(1047, 'sine', 0.35, 0.28, 0.46);
+}
+// 敗北
+function sfxLose() {
+  playTone(330, 'sawtooth', 0.16, 0.28, 0);
+  playTone(220, 'sawtooth', 0.20, 0.28, 0.17);
+  playTone(140, 'sawtooth', 0.30, 0.28, 0.36);
+}
+
+// ======================================================
+// ゲーム状態変数
+// ======================================================
+// 'TITLE' | 'PLAYING' | 'BOSS_INTRO' | 'BOSS_BATTLE' | 'WIN' | 'LOSE'
+let gameState   = 'TITLE';
+let stage       = 1;
+let playerX     = LOGICAL_W / 2;
 let playerValue = 10;
-let playerX = W / 2;
-let targetX = W / 2;
+
+// コースデータ
+let courseObjects = []; // { type:'gate'|'enemy', x, y, screenY, ...}
+let courseWorldLen = 0; // ボス出現までのworld-Y距離
+
+// スクロール
+let scrollY     = 0;   // スクロール済みworld-Y
+let scrollSpeed = 0;   // px/sec (world-Y)
+
+// ボス
+let bossValue  = 0;
+let bossPhase  = 0;    // 0=intro 1=battle 2=result
+let bossAnimT  = 0;    // フェーズ内経過秒
+let bossResult = '';   // 'win'|'lose'
+
+// パーティクル / ポップアップ / 星
 let particles = [];
-let popups = [];
-let enemies = [];
-let gates = [];
-let stagePhase = 'gates'; // gates | battle
-let battleEnemyIndex = 0;
-let battleAnim = 0;
-let battleResult = null; // null | win | lose
-let frameCount = 0;
-let shakeX = 0, shakeY = 0;
-let bgHue = 260;
-let flashAlpha = 0;
-let flashColor = '#fff';
+let popups    = [];
+let stars     = [];
 
-// --- 定数 ---
-const PLAYER_R = 26;
-const ENEMY_R = 22;
-const GATE_W = 90, GATE_H = 44;
-const GATE_ROW_Y = [H * 0.3, H * 0.48, H * 0.63];
-const PLAYER_Y = H - 90;
-const PLAYER_SPEED = 0.16;
+// 入力
+let inputLeft       = false;
+let inputRight      = false;
+let pointerActive   = false;
+let pointerStartX   = 0;
+let pointerCurrentX = 0;
 
-// --- ステージ設定 ---
-function getStageConfig(s) {
-  return {
-    enemyCount: 2 + Math.min(s, 4),
-    enemyValueMin: 5 + s * 3,
-    enemyValueMax: 12 + s * 6,
-    gateRows: Math.min(3, 1 + Math.floor(s / 2)),
-    gateCols: 3,
-    enemySpeed: 0.3 + s * 0.08,
-    startValue: 10,
-  };
-}
+// ループ用
+let lastTime = 0;
 
-// --- ゲート演算定義 ---
-const GATE_GOOD = [
-  { label: '+5',  op: v => v + 5,   color: '#34d399' },
-  { label: '+10', op: v => v + 10,  color: '#22c55e' },
-  { label: '+20', op: v => v + 20,  color: '#16a34a' },
-  { label: 'x2',  op: v => v * 2,   color: '#60a5fa' },
-  { label: 'x3',  op: v => v * 3,   color: '#3b82f6' },
-  { label: '+30', op: v => v + 30,  color: '#a78bfa' },
-  { label: 'x5',  op: v => v * 5,   color: '#818cf8' },
-];
-const GATE_BAD = [
-  { label: '-5',  op: v => Math.max(1, v - 5),             color: '#f87171' },
-  { label: '/2',  op: v => Math.max(1, Math.floor(v / 2)), color: '#fb923c' },
-  { label: '/3',  op: v => Math.max(1, Math.floor(v / 3)), color: '#f97316' },
-  { label: '-10', op: v => Math.max(1, v - 10),            color: '#ef4444' },
-];
-
-function pickGateOps(cols, s) {
-  const result = [];
-  for (let i = 0; i < cols; i++) {
-    // ステージが上がると不利ゲートが1つ混入しやすくなる
-    const useBad = (s > 1) && (i === Math.floor(cols / 2));
-    if (useBad) {
-      result.push(GATE_BAD[Math.floor(Math.random() * GATE_BAD.length)]);
-    } else {
-      result.push(GATE_GOOD[Math.floor(Math.random() * GATE_GOOD.length)]);
-    }
-  }
-  return result;
-}
-
-function initStage() {
-  const cfg = getStageConfig(stage);
-  playerValue = cfg.startValue;
-  playerX = W / 2;
-  targetX = W / 2;
-  particles = [];
-  popups = [];
-  enemies = [];
-  gates = [];
-  stagePhase = 'gates';
-  battleEnemyIndex = 0;
-  battleAnim = 0;
-  battleResult = null;
-  frameCount = 0;
-  shakeX = 0; shakeY = 0;
-  flashAlpha = 0;
-
-  // 敵生成
-  for (let i = 0; i < cfg.enemyCount; i++) {
-    const v = cfg.enemyValueMin + Math.floor(Math.random() * (cfg.enemyValueMax - cfg.enemyValueMin));
-    const hue = Math.random() * 40 + 340;
-    enemies.push({
-      x: 55 + (i / Math.max(cfg.enemyCount - 1, 1)) * (W - 110),
-      y: -60 - i * 50,
-      vy: cfg.enemySpeed + Math.random() * 0.1,
-      value: v,
-      r: ENEMY_R,
-      color: `hsl(${hue},90%,60%)`,
-      alive: true,
-      settled: false,
-      settleY: 72 + i * 46,
-      hue,
-    });
-  }
-
-  // ゲート生成
-  for (let row = 0; row < cfg.gateRows; row++) {
-    const y = GATE_ROW_Y[row] !== undefined ? GATE_ROW_Y[row] : H * 0.38 + row * 120;
-    const ops = pickGateOps(cfg.gateCols, stage);
-    const totalW = cfg.gateCols * GATE_W + (cfg.gateCols - 1) * 12;
-    const startX = (W - totalW) / 2;
-    for (let col = 0; col < cfg.gateCols; col++) {
-      gates.push({
-        x: startX + col * (GATE_W + 12),
-        y: y - GATE_H / 2,
-        w: GATE_W,
-        h: GATE_H,
-        op: ops[col],
-        passed: false,
-        row,
-        glow: 0,
-      });
-    }
-  }
-}
-
-// --- パーティクル ---
-function spawnParticles(x, y, color, count) {
-  count = count || 14;
-  for (let i = 0; i < count; i++) {
-    const angle = Math.random() * Math.PI * 2;
-    const speed = 2 + Math.random() * 5;
-    particles.push({
-      x, y,
-      vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed - 1,
-      life: 1,
-      decay: 0.025 + Math.random() * 0.025,
-      r: 3 + Math.random() * 5,
-      color,
+// ======================================================
+// 星背景
+// ======================================================
+function initStars() {
+  stars = [];
+  for (let i = 0; i < 90; i++) {
+    stars.push({
+      x:     Math.random() * LOGICAL_W,
+      y:     Math.random() * LOGICAL_H,
+      r:     Math.random() * 1.5 + 0.25,
+      speed: Math.random() * 65 + 20,
+      alpha: Math.random() * 0.8 + 0.2,
     });
   }
 }
 
-function spawnPopup(x, y, text, color) {
-  popups.push({ x, y, text, color, life: 1, vy: -1.4 });
+// ======================================================
+// ゲート演算子定義
+// ======================================================
+const OPS = [
+  { label: '+5',  fn: v => v + 5,                        good: true  },
+  { label: '+10', fn: v => v + 10,                       good: true  },
+  { label: '+15', fn: v => v + 15,                       good: true  },
+  { label: '+20', fn: v => v + 20,                       good: true  },
+  { label: '×2',  fn: v => v * 2,                        good: true  },
+  { label: '×3',  fn: v => v * 3,                        good: true  },
+  { label: '−5',  fn: v => Math.max(0, v - 5),           good: false },
+  { label: '−10', fn: v => Math.max(0, v - 10),          good: false },
+  { label: '÷2',  fn: v => Math.max(0, Math.floor(v/2)), good: false },
+  { label: '÷3',  fn: v => Math.max(0, Math.floor(v/3)), good: false },
+];
+function pickOp(good) {
+  const pool = OPS.filter(o => o.good === good);
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
-// --- 入力 ---
-function getCanvasX(clientX) {
-  const rect = canvas.getBoundingClientRect();
-  return (clientX - rect.left) * (W / rect.width);
-}
+// ======================================================
+// コース生成 & ボス値計算
+// ======================================================
+function buildCourse() {
+  courseObjects = [];
 
-canvas.addEventListener('mousemove', function(e) {
-  if (state !== 'playing' || stagePhase !== 'gates') return;
-  targetX = getCanvasX(e.clientX);
-});
-canvas.addEventListener('touchmove', function(e) {
-  e.preventDefault();
-  if (state !== 'playing' || stagePhase !== 'gates') return;
-  targetX = getCanvasX(e.touches[0].clientX);
-}, { passive: false });
-canvas.addEventListener('mousedown', function(e) {
-  if (state !== 'playing' || stagePhase !== 'gates') return;
-  targetX = getCanvasX(e.clientX);
-});
-canvas.addEventListener('touchstart', function(e) {
-  e.preventDefault();
-  if (state !== 'playing' || stagePhase !== 'gates') return;
-  targetX = getCanvasX(e.touches[0].clientX);
-}, { passive: false });
+  for (let row = 0; row < GATE_ROWS; row++) {
+    const gy = COURSE_STARTWORLD_Y + row * ROW_SPACING;
 
-// ボタン
-document.getElementById('startBtn').onclick = function() {
-  stage = 1;
-  document.getElementById('startScreen').classList.add('hidden');
-  startGame();
-};
-document.getElementById('retryBtn').onclick = function() {
-  stage = 1;
-  document.getElementById('gameoverScreen').classList.add('hidden');
-  startGame();
-};
-document.getElementById('nextBtn').onclick = function() {
-  stage++;
-  document.getElementById('clearScreen').classList.add('hidden');
-  startGame();
-};
+    // 左右ゲートペア（片方良い・片方悪い）
+    const leftGood = Math.random() < 0.5;
+    const lx = 110, rx = 290;
+    courseObjects.push({
+      type: 'gate', x: lx, y: gy,
+      op: pickOp(leftGood), passed: false, id: `g${row}L`
+    });
+    courseObjects.push({
+      type: 'gate', x: rx, y: gy,
+      op: pickOp(!leftGood), passed: false, id: `g${row}R`
+    });
 
-function startGame() {
-  state = 'playing';
-  initStage();
-  bgHue = 260;
-}
-
-// --- 描画ユーティリティ ---
-function drawRoundRect(x, y, w, h, r, fill, stroke, sw) {
-  sw = sw || 2;
-  ctx.beginPath();
-  if (ctx.roundRect) {
-    ctx.roundRect(x, y, w, h, r);
-  } else {
-    // フォールバック
-    ctx.moveTo(x + r, y);
-    ctx.lineTo(x + w - r, y);
-    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-    ctx.lineTo(x + w, y + h - r);
-    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-    ctx.lineTo(x + r, y + h);
-    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-    ctx.lineTo(x, y + r);
-    ctx.quadraticCurveTo(x, y, x + r, y);
-    ctx.closePath();
-  }
-  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
-  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = sw; ctx.stroke(); }
-}
-
-function drawCircleGrad(x, y, r, c1, c2) {
-  const g = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, r * 0.1, x, y, r);
-  g.addColorStop(0, c1);
-  g.addColorStop(1, c2);
-  ctx.beginPath();
-  ctx.arc(x, y, r, 0, Math.PI * 2);
-  ctx.fillStyle = g;
-  ctx.fill();
-}
-
-// --- 更新 ---
-function update() {
-  frameCount++;
-  bgHue = (bgHue + 0.2) % 360;
-  shakeX *= 0.82;
-  shakeY *= 0.82;
-  if (Math.abs(shakeX) < 0.1) shakeX = 0;
-  if (Math.abs(shakeY) < 0.1) shakeY = 0;
-  flashAlpha *= 0.88;
-
-  // パーティクル更新
-  for (let i = 0; i < particles.length; i++) {
-    const p = particles[i];
-    p.x += p.vx; p.y += p.vy;
-    p.vy += 0.12;
-    p.vx *= 0.97;
-    p.life -= p.decay;
-  }
-  particles = particles.filter(function(p) { return p.life > 0; });
-
-  // ポップアップ更新
-  for (let i = 0; i < popups.length; i++) {
-    popups[i].y += popups[i].vy;
-    popups[i].life -= 0.02;
-  }
-  popups = popups.filter(function(p) { return p.life > 0; });
-
-  if (stagePhase === 'gates') {
-    updateGatesPhase();
-  } else if (stagePhase === 'battle') {
-    updateBattlePhase();
-  }
-}
-
-function updateGatesPhase() {
-  // プレイヤー移動
-  playerX += (targetX - playerX) * PLAYER_SPEED;
-  playerX = Math.max(PLAYER_R, Math.min(W - PLAYER_R, playerX));
-
-  // ゲート当たり判定（行ごとに1回）
-  for (let i = 0; i < gates.length; i++) {
-    const gate = gates[i];
-    if (gate.passed) continue;
-    const py = PLAYER_Y;
-    if (py + PLAYER_R >= gate.y && py - PLAYER_R <= gate.y + gate.h) {
-      if (playerX >= gate.x && playerX <= gate.x + gate.w) {
-        // 同行のゲートをすべてpassed
-        for (let j = 0; j < gates.length; j++) {
-          if (gates[j].row === gate.row) gates[j].passed = true;
-        }
-        const oldVal = playerValue;
-        playerValue = gate.op.op(playerValue);
-        const diff = playerValue - oldVal;
-        const sign = diff >= 0 ? '+' : '';
-        spawnParticles(playerX, py, gate.op.color, 20);
-        spawnPopup(playerX, py - 40, sign + diff, gate.op.color);
-        gate.glow = 1;
-        flashAlpha = 0.22;
-        flashColor = gate.op.color;
-        break;
+    // 雑魚敵（行間・確率的）
+    if (row < GATE_ROWS - 1 && Math.random() < 0.55) {
+      const ey = gy + ROW_SPACING * 0.5;
+      const cnt = Math.random() < 0.35 ? 2 : 1;
+      for (let e = 0; e < cnt; e++) {
+        courseObjects.push({
+          type: 'enemy',
+          x:    70 + Math.random() * 260,
+          y:    ey + e * 65,
+          value: 3 + Math.floor(Math.random() * 7 * (1 + stage * 0.25)),
+          alive: true,
+          id: `e${row}_${e}`,
+        });
       }
     }
   }
 
-  // 敵降下
-  let allSettled = true;
-  for (let i = 0; i < enemies.length; i++) {
-    const e = enemies[i];
-    if (!e.alive || e.settled) continue;
-    e.y += e.vy;
-    if (e.y >= e.settleY) {
-      e.y = e.settleY;
-      e.settled = true;
-    } else {
-      allSettled = false;
+  courseWorldLen = COURSE_STARTWORLD_Y + GATE_ROWS * ROW_SPACING + 350;
+
+  // ----- ボス値: 全行で最善ゲートを選んだ場合のシミュレート -----
+  let sim = playerValue;
+  for (let row = 0; row < GATE_ROWS; row++) {
+    const rowGates = courseObjects.filter(o => o.type === 'gate' && o.id.startsWith(`g${row}`));
+    let best = sim;
+    for (const g of rowGates) {
+      const v = g.op.fn(sim);
+      if (v > best) best = v;
+    }
+    sim = best;
+  }
+  // ボス = 最善値の65%（プレイヤーが常に勝てる設計）
+  const baseBoss = 30 + stage * 25;
+  bossValue = Math.min(baseBoss, Math.floor(sim * 0.65));
+  bossValue = Math.max(bossValue, 5);
+}
+
+// ======================================================
+// ステージ初期化
+// ======================================================
+function initStage() {
+  scrollY     = 0;
+  playerX     = LOGICAL_W / 2;
+  scrollSpeed = 155 + stage * 12;
+  buildCourse();
+  particles = [];
+  popups    = [];
+  bossPhase  = 0;
+  bossAnimT  = 0;
+  bossResult = '';
+  gameState  = 'PLAYING';
+}
+
+// ======================================================
+// パーティクルシステム
+// ======================================================
+function spawnParticles(x, y, color, count, speed) {
+  for (let i = 0; i < count; i++) {
+    const a = (Math.PI * 2 * i / count) + Math.random() * 0.6;
+    const s = speed * (0.4 + Math.random() * 0.9);
+    particles.push({
+      x, y,
+      vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+      r: 2.2 + Math.random() * 3, color,
+      life: 1, decay: 0.018 + Math.random() * 0.022,
+      type: 'circle',
+    });
+  }
+}
+function spawnConfetti(cx, cy) {
+  const colors = ['#ff6b6b','#ffd93d','#6bcb77','#4d96ff','#ff6bdb','#fff','#ffaa44'];
+  for (let i = 0; i < 75; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const s = 2.5 + Math.random() * 5;
+    particles.push({
+      x: cx, y: cy,
+      vx: Math.cos(a) * s, vy: Math.sin(a) * s - 5,
+      r: 4 + Math.random() * 5,
+      color: colors[i % colors.length],
+      life: 1, decay: 0.007 + Math.random() * 0.007,
+      type: 'confetti',
+      rot: Math.random() * Math.PI * 2,
+      rotSpd: (Math.random() - 0.5) * 0.18,
+    });
+  }
+}
+function addPopup(x, y, text, color) {
+  popups.push({ x, y, text, color: color || '#fff', life: 1 });
+}
+
+// ======================================================
+// 当たり判定
+// ======================================================
+function circleHit(ax, ay, ar, bx, by, br) {
+  const dx = ax - bx, dy = ay - by;
+  return dx*dx + dy*dy < (ar+br)*(ar+br);
+}
+// ゲート通過: プレイヤー中心がゲートX範囲内かつY通過
+function gateHit(px, py, gate) {
+  const hw = GATE_W / 2 + PLAYER_R * 0.55;
+  const sy = gate.screenY;
+  return px > gate.x - hw && px < gate.x + hw
+      && py > sy - 8       && py < sy + GATE_H + 8;
+}
+
+// ======================================================
+// 更新ループ
+// ======================================================
+function update(dt) {
+  updateStars(dt);
+
+  if (gameState === 'TITLE' || gameState === 'WIN' || gameState === 'LOSE') {
+    updateParticles(dt);
+    updatePopups(dt);
+    return;
+  }
+  if (gameState === 'BOSS_INTRO' || gameState === 'BOSS_BATTLE') {
+    updateBoss(dt);
+    updateParticles(dt);
+    updatePopups(dt);
+    return;
+  }
+
+  // ---- PLAYING ----
+  // 左右移動
+  const MV = 300;
+  if (inputLeft)  playerX -= MV * dt;
+  if (inputRight) playerX += MV * dt;
+  if (pointerActive) {
+    playerX += (pointerCurrentX - pointerStartX) * 0.7;
+    pointerStartX = pointerCurrentX;
+  }
+  playerX = Math.max(PLAYER_R, Math.min(LOGICAL_W - PLAYER_R, playerX));
+
+  // スクロール
+  scrollY += scrollSpeed * dt;
+  if (scrollY >= courseWorldLen) {
+    gameState = 'BOSS_INTRO';
+    bossPhase = 0; bossAnimT = 0;
+    sfxBoss();
+    return;
+  }
+
+  // コースオブジェクト: screen-Y計算 & 衝突
+  for (const obj of courseObjects) {
+    obj.screenY = obj.y - scrollY + LOGICAL_H * 0.15;
+    if (obj.screenY < -120 || obj.screenY > LOGICAL_H + 80) continue;
+
+    if (obj.type === 'gate' && !obj.passed) {
+      if (gateHit(playerX, PLAYER_Y, obj)) {
+        obj.passed  = true;
+        const before = playerValue;
+        playerValue  = Math.max(0, obj.op.fn(playerValue));
+        const diff   = playerValue - before;
+        addPopup(playerX, PLAYER_Y - 56, (diff >= 0 ? '+' : '') + diff,
+                 obj.op.good ? '#7fff7f' : '#ff7777');
+        spawnParticles(playerX, PLAYER_Y, obj.op.good ? '#55ff88' : '#ff5555', 14, 3.5);
+        sfxGate(obj.op.good);
+      }
+    }
+    if (obj.type === 'enemy' && obj.alive) {
+      if (circleHit(playerX, PLAYER_Y, PLAYER_R, obj.x, obj.screenY, ENEMY_R)) {
+        obj.alive = false;
+        playerValue = Math.max(0, playerValue - obj.value);
+        addPopup(playerX, PLAYER_Y - 56, '-' + obj.value, '#ff4444');
+        spawnParticles(obj.x, obj.screenY, '#ff5500', 18, 4.5);
+        sfxDamage();
+      }
     }
   }
 
-  // 全ゲート行を通過 & 全敵が定位置に着いたらバトルへ
-  const totalRows = new Set(gates.map(function(g) { return g.row; })).size;
-  const rowsPassed = new Set(gates.filter(function(g) { return g.passed; }).map(function(g) { return g.row; })).size;
+  updateParticles(dt);
+  updatePopups(dt);
+}
 
-  if (rowsPassed >= totalRows && allSettled) {
-    stagePhase = 'battle';
-    battleAnim = 0;
-    battleEnemyIndex = 0;
-    spawnParticles(W / 2, H / 2, '#fbbf24', 30);
+function updateStars(dt) {
+  const spd = gameState === 'PLAYING' ? scrollSpeed / 155 : 0.65;
+  for (const s of stars) {
+    s.y += s.speed * spd * dt;
+    if (s.y > LOGICAL_H + 4) { s.y = -4; s.x = Math.random() * LOGICAL_W; }
   }
 }
 
-function updateBattlePhase() {
-  if (battleResult) return;
-  battleAnim++;
+function updateParticles(dt) {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx; p.y += p.vy;
+    p.vy += 0.15;
+    p.life -= p.decay;
+    if (p.rot !== undefined) p.rot += p.rotSpd;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
 
-  if (battleAnim === 80) {
-    const aliveEnemies = enemies.filter(function(e) { return e.alive; });
-    const e = aliveEnemies[0];
-    if (!e) {
-      // 全撃破
-      battleResult = 'win';
-      flashAlpha = 0.5;
-      flashColor = '#22c55e';
-      spawnParticles(W / 2, H / 2, '#fbbf24', 60);
-      setTimeout(function() {
-        state = 'clear';
-        document.getElementById('clearScore').textContent = playerValue;
-        document.getElementById('clearMsg').textContent = 'ステージ ' + stage + ' クリア!';
-        document.getElementById('clearScreen').classList.remove('hidden');
-      }, 1200);
-      return;
+function updatePopups(dt) {
+  for (let i = popups.length - 1; i >= 0; i--) {
+    popups[i].y  -= 1.3;
+    popups[i].life -= 0.016;
+    if (popups[i].life <= 0) popups.splice(i, 1);
+  }
+}
+
+function updateBoss(dt) {
+  bossAnimT += dt;
+
+  if (gameState === 'BOSS_INTRO') {
+    if (bossAnimT > 1.9) {
+      gameState = 'BOSS_BATTLE';
+      bossPhase = 1; bossAnimT = 0;
     }
-    if (playerValue > e.value) {
-      e.alive = false;
-      spawnParticles(e.x, e.y, '#fbbf24', 25);
-      spawnPopup(e.x, e.y - 20, '撃破!', '#fbbf24');
-      shakeX = 8; shakeY = 5;
-      flashAlpha = 0.28;
-      flashColor = '#fbbf24';
-      battleAnim = 0;
-    } else {
-      battleResult = 'lose';
-      shakeX = 15; shakeY = 10;
-      flashAlpha = 0.6;
-      flashColor = '#ef4444';
-      spawnParticles(W * 0.3, H * 0.6, '#ef4444', 40);
-      setTimeout(function() {
-        state = 'gameover';
-        document.getElementById('goMsg').textContent =
-          'あなた: ' + playerValue + ' vs 敵: ' + e.value + '\nステージ ' + stage;
-        document.getElementById('gameoverScreen').classList.remove('hidden');
-      }, 1000);
+  } else if (gameState === 'BOSS_BATTLE') {
+    if (bossPhase === 1 && bossAnimT > 1.4) {
+      bossResult = playerValue > bossValue ? 'win' : 'lose';
+      bossPhase = 2; bossAnimT = 0;
+      if (bossResult === 'win') {
+        sfxWin();
+        spawnConfetti(LOGICAL_W / 2, LOGICAL_H / 2);
+      } else {
+        sfxLose();
+        spawnParticles(LOGICAL_W / 2, LOGICAL_H / 2, '#ff3300', 25, 5.5);
+      }
+    }
+    if (bossPhase === 2 && bossAnimT > 2.2) {
+      gameState = bossResult === 'win' ? 'WIN' : 'LOSE';
     }
   }
 }
 
-// --- 描画 ---
-var starCache = null;
-
+// ======================================================
+// 描画
+// ======================================================
 function draw() {
-  ctx.save();
-  ctx.translate(Math.round(shakeX), Math.round(shakeY));
-
-  // 背景グラデ
-  const bg = ctx.createLinearGradient(0, 0, 0, H);
-  bg.addColorStop(0, 'hsl(' + bgHue + ',70%,8%)');
-  bg.addColorStop(0.5, 'hsl(' + ((bgHue + 40) % 360) + ',60%,12%)');
-  bg.addColorStop(1, 'hsl(' + ((bgHue + 80) % 360) + ',80%,6%)');
+  // 夜空グラデーション背景
+  const bg = ctx.createLinearGradient(0, 0, 0, LOGICAL_H);
+  bg.addColorStop(0,   '#08021a');
+  bg.addColorStop(0.5, '#130530');
+  bg.addColorStop(1,   '#200a42');
   ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, W, H);
+  ctx.fillRect(0, 0, LOGICAL_W, LOGICAL_H);
 
   drawStars();
 
-  if (state === 'playing') {
-    if (stagePhase === 'gates') {
-      drawGates();
-      drawEnemies();
-      drawPlayer();
-      drawHUD();
-    } else if (stagePhase === 'battle') {
-      drawBattle();
-    }
-  }
+  if      (gameState === 'TITLE')     drawTitle();
+  else if (gameState === 'PLAYING')   drawGame();
+  else if (gameState === 'BOSS_INTRO' || gameState === 'BOSS_BATTLE') drawBossScene();
+  else if (gameState === 'WIN')       drawResult(true);
+  else if (gameState === 'LOSE')      drawResult(false);
 
-  // パーティクル
-  for (let i = 0; i < particles.length; i++) {
-    const p = particles[i];
-    ctx.globalAlpha = p.life;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, p.r * p.life, 0, Math.PI * 2);
-    ctx.fillStyle = p.color;
-    ctx.fill();
-  }
-  ctx.globalAlpha = 1;
+  drawParticles();
+  drawPopups();
+}
 
-  // ポップアップ
-  for (let i = 0; i < popups.length; i++) {
-    const p = popups[i];
+// ----- 星 -----
+function drawStars() {
+  for (const s of stars) {
     ctx.save();
-    ctx.globalAlpha = p.life;
-    ctx.font = 'bold ' + (24 + Math.round((1 - p.life) * 10)) + 'px Arial';
-    ctx.fillStyle = p.color;
-    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-    ctx.lineWidth = 4;
-    ctx.textAlign = 'center';
-    ctx.strokeText(p.text, p.x, p.y);
-    ctx.fillText(p.text, p.x, p.y);
+    ctx.globalAlpha = s.alpha;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    ctx.fill();
     ctx.restore();
   }
+}
 
-  // フラッシュ
-  if (flashAlpha > 0.01) {
-    ctx.globalAlpha = flashAlpha;
-    ctx.fillStyle = flashColor;
-    ctx.fillRect(0, 0, W, H);
-    ctx.globalAlpha = 1;
-  }
+// ----- プレイヤー（青丸・にこにこ顔・頭上数値）-----
+function drawPlayer(x, y, value, r, shimmer) {
+  ctx.save();
+  // 外周オーラ
+  const aura = ctx.createRadialGradient(x, y, 0, x, y, r * 2);
+  aura.addColorStop(0, 'rgba(80,140,255,0.28)');
+  aura.addColorStop(1, 'rgba(80,140,255,0)');
+  ctx.fillStyle = aura;
+  ctx.beginPath(); ctx.arc(x, y, r * 2, 0, Math.PI * 2); ctx.fill();
 
+  // 本体
+  const body = ctx.createRadialGradient(x - r*0.3, y - r*0.3, 0, x, y, r);
+  body.addColorStop(0, shimmer ? '#c8e8ff' : '#8ec8ff');
+  body.addColorStop(1, shimmer ? '#5599ee' : '#1a4fcc');
+  ctx.fillStyle = body;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#aaddff'; ctx.lineWidth = 2; ctx.stroke();
+
+  // 目
+  const eo = r * 0.28, er = r * 0.13;
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(x-eo, y-r*0.1, er*1.2, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x+eo, y-r*0.1, er*1.2, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#111133';
+  ctx.beginPath(); ctx.arc(x-eo+1, y-r*0.1+1, er*0.7, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x+eo+1, y-r*0.1+1, er*0.7, 0, Math.PI*2); ctx.fill();
+  // 笑顔
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(x, y+r*0.18, r*0.33, 0.1, Math.PI-0.1); ctx.stroke();
+
+  // 頭上数値（大きく）
+  ctx.fillStyle = '#fff';
+  ctx.font = `bold ${Math.round(r * 1.05)}px system-ui`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+  ctx.shadowColor = '#4488ff'; ctx.shadowBlur = 7;
+  ctx.fillText(value, x, y - r - 4);
   ctx.restore();
 }
 
-function drawStars() {
-  if (!starCache) {
-    starCache = [];
-    for (let i = 0; i < 80; i++) {
-      starCache.push({
-        x: Math.random() * W,
-        y: Math.random() * H,
-        r: Math.random() * 1.5 + 0.3,
-        b: Math.random(),
-      });
-    }
-  }
-  for (let i = 0; i < starCache.length; i++) {
-    const s = starCache[i];
-    const alpha = 0.3 + 0.5 * Math.abs(Math.sin(frameCount * 0.02 + s.b * 10));
-    ctx.beginPath();
-    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(255,255,255,' + alpha + ')';
-    ctx.fill();
-  }
-}
+// ----- 雑魚敵（赤丸・怒り顔・頭上数値）-----
+function drawEnemy(x, y, value, r) {
+  ctx.save();
+  const body = ctx.createRadialGradient(x-r*0.3, y-r*0.3, 0, x, y, r);
+  body.addColorStop(0, '#ff9977'); body.addColorStop(1, '#bb1100');
+  ctx.fillStyle = body;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = '#ff5533'; ctx.lineWidth = 1.5; ctx.stroke();
 
-function drawHUD() {
-  ctx.font = 'bold 15px Arial';
-  ctx.fillStyle = '#c4b5fd';
-  ctx.textAlign = 'left';
-  ctx.fillText('STAGE ' + stage, 16, 24);
-
-  ctx.font = 'bold 22px Arial';
-  ctx.textAlign = 'center';
-  ctx.shadowColor = '#fbbf24';
-  ctx.shadowBlur = 12;
-  ctx.fillStyle = '#fbbf24';
-  ctx.fillText('' + playerValue, W / 2, 27);
-  ctx.shadowBlur = 0;
-}
-
-function drawGates() {
-  for (let i = 0; i < gates.length; i++) {
-    const gate = gates[i];
-    if (gate.passed) continue;
-    gate.glow = (gate.glow || 0) * 0.92;
-    const { x, y, w, h, op } = gate;
-
-    ctx.shadowColor = op.color;
-    ctx.shadowBlur = 12 + (gate.glow || 0) * 20;
-
-    // 背景グラデ
-    const gg = ctx.createLinearGradient(x, y, x, y + h);
-    gg.addColorStop(0, op.color + 'cc');
-    gg.addColorStop(1, op.color + '44');
-    drawRoundRect(x, y, w, h, 14, gg, op.color, 2.5);
-
-    ctx.shadowBlur = 0;
-    ctx.font = 'bold ' + Math.round(h * 0.54) + 'px Arial';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#fff';
-    ctx.fillText(op.label, x + w / 2, y + h / 2);
-    ctx.textBaseline = 'alphabetic';
-  }
-  ctx.shadowBlur = 0;
-}
-
-function drawFace(x, y, faceR, isEvil) {
   // 目
+  const eo = r*0.28, er = r*0.14;
   ctx.fillStyle = '#fff';
-  ctx.beginPath(); ctx.arc(x - faceR * 0.3, y - faceR * 0.22, faceR * 0.2, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath(); ctx.arc(x + faceR * 0.3, y - faceR * 0.22, faceR * 0.2, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = isEvil ? '#333' : '#1e40af';
-  ctx.beginPath(); ctx.arc(x - faceR * 0.28, y - faceR * 0.22, faceR * 0.1, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath(); ctx.arc(x + faceR * 0.32, y - faceR * 0.22, faceR * 0.1, 0, Math.PI * 2); ctx.fill();
-  // 口
-  ctx.strokeStyle = isEvil ? '#333' : '#1e40af';
+  ctx.beginPath(); ctx.arc(x-eo, y-r*0.1, er*1.1, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x+eo, y-r*0.1, er*1.1, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#220000';
+  ctx.beginPath(); ctx.arc(x-eo, y-r*0.1, er*0.6, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x+eo, y-r*0.1, er*0.6, 0, Math.PI*2); ctx.fill();
+  // 怒り眉
+  ctx.strokeStyle = '#ffcc00'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(x-eo-er, y-r*0.31); ctx.lineTo(x-eo+er*0.5, y-r*0.21); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x+eo+er, y-r*0.31); ctx.lineTo(x+eo-er*0.5, y-r*0.21); ctx.stroke();
+  // への字口
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(x, y+r*0.28, r*0.25, Math.PI+0.22, -0.22); ctx.stroke();
+
+  // 頭上ダメージ値
+  ctx.fillStyle = '#ffbbbb';
+  ctx.font = `bold ${Math.round(r * 0.9)}px system-ui`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+  ctx.fillText('-' + value, x, y - r - 2);
+  ctx.restore();
+}
+
+// ----- ボス（大きな紫キャラ・ツノ付き）-----
+function drawBoss(x, y, value, shake) {
+  const r = BOSS_R;
+  const ox = shake ? (Math.random()-0.5)*10 : 0;
+  const oy = shake ? (Math.random()-0.5)*10 : 0;
+  ctx.save();
+
+  // 巨大オーラ
+  const aura = ctx.createRadialGradient(x+ox, y+oy, 0, x+ox, y+oy, r*2.8);
+  aura.addColorStop(0, 'rgba(210,55,255,0.42)');
+  aura.addColorStop(1, 'rgba(210,55,255,0)');
+  ctx.fillStyle = aura;
+  ctx.beginPath(); ctx.arc(x+ox, y+oy, r*2.8, 0, Math.PI*2); ctx.fill();
+
+  // ツノ（左右）
+  ctx.fillStyle = '#ff44bb';
+  ctx.beginPath();
+  ctx.moveTo(x+ox-14, y+oy-r*0.85); ctx.lineTo(x+ox-7, y+oy-r*1.65);
+  ctx.lineTo(x+ox-1, y+oy-r*0.7); ctx.closePath(); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(x+ox+14, y+oy-r*0.85); ctx.lineTo(x+ox+7, y+oy-r*1.65);
+  ctx.lineTo(x+ox+1, y+oy-r*0.7); ctx.closePath(); ctx.fill();
+
+  // 本体
+  const body = ctx.createRadialGradient(x+ox-r*0.3, y+oy-r*0.3, 0, x+ox, y+oy, r);
+  body.addColorStop(0, '#dd88ff'); body.addColorStop(1, '#5a0088');
+  ctx.fillStyle = body;
+  ctx.beginPath(); ctx.arc(x+ox, y+oy, r, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = '#ff88ff'; ctx.lineWidth = 3; ctx.stroke();
+
+  // 目（黄色・強そう）
+  const eo = r*0.3, er = r*0.17;
+  ctx.fillStyle = '#ffdd00';
+  ctx.beginPath(); ctx.arc(x+ox-eo, y+oy-r*0.12, er, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x+ox+eo, y+oy-r*0.12, er, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#110022';
+  ctx.beginPath(); ctx.arc(x+ox-eo+1, y+oy-r*0.12, er*0.55, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x+ox+eo+1, y+oy-r*0.12, er*0.55, 0, Math.PI*2); ctx.fill();
+  // ニヤリ口
+  ctx.strokeStyle = '#ffaaff'; ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.arc(x+ox, y+oy+r*0.22, r*0.42, 0.1, Math.PI-0.1); ctx.stroke();
+
+  // 頭上数値
+  ctx.fillStyle = '#ffccff';
+  ctx.font = `bold ${Math.round(r*0.75)}px system-ui`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+  ctx.shadowColor = '#ff44ff'; ctx.shadowBlur = 9;
+  ctx.fillText(value, x+ox, y+oy - r - 8);
+  ctx.restore();
+}
+
+// ----- ゲート -----
+function drawGate(obj) {
+  const x = obj.x, y = obj.screenY;
+  const good = obj.op.good;
+  ctx.save();
+
+  const grad = ctx.createLinearGradient(x-GATE_W/2, y, x+GATE_W/2, y+GATE_H);
+  if (good) {
+    grad.addColorStop(0, 'rgba(50,200,100,0.88)');
+    grad.addColorStop(1, 'rgba(20,130,55,0.88)');
+  } else {
+    grad.addColorStop(0, 'rgba(220,50,50,0.88)');
+    grad.addColorStop(1, 'rgba(140,15,15,0.88)');
+  }
+  ctx.fillStyle = grad;
+  ctx.strokeStyle = good ? '#77ff99' : '#ff8888';
   ctx.lineWidth = 2;
   ctx.beginPath();
-  if (isEvil) {
-    ctx.arc(x, y + faceR * 0.12, faceR * 0.28, 0.2, Math.PI - 0.2); // 怒り顔
-  } else {
-    ctx.arc(x, y + faceR * 0.15, faceR * 0.3, 0, Math.PI); // 笑顔
+  if (ctx.roundRect) ctx.roundRect(x-GATE_W/2, y, GATE_W, GATE_H, 10);
+  else { // フォールバック
+    ctx.rect(x-GATE_W/2, y, GATE_W, GATE_H);
   }
-  ctx.stroke();
+  ctx.fill(); ctx.stroke();
+
+  // ハイライト
+  ctx.fillStyle = good ? 'rgba(180,255,200,0.18)' : 'rgba(255,180,180,0.18)';
+  ctx.beginPath(); ctx.rect(x-GATE_W/2+4, y+4, GATE_W-8, GATE_H/3); ctx.fill();
+
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 19px system-ui';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.shadowColor = good ? '#00ff66' : '#ff4444'; ctx.shadowBlur = 5;
+  ctx.fillText(obj.op.label, x, y + GATE_H/2);
+  ctx.restore();
 }
 
-function drawEnemies() {
-  for (let i = 0; i < enemies.length; i++) {
-    const e = enemies[i];
-    if (!e.alive) continue;
-    const bounce = Math.sin(frameCount * 0.06 + e.hue) * 3;
-    const ey = e.y + bounce;
+// ----- HUDバー -----
+function drawHUD() {
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.52)';
+  ctx.fillRect(0, 0, LOGICAL_W, 44);
+  ctx.fillStyle = '#aabbff';
+  ctx.font = 'bold 17px system-ui';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillText(`ステージ ${stage}`, 14, 22);
+  ctx.fillStyle = '#ffffaa';
+  ctx.textAlign = 'right';
+  ctx.fillText(`数値: ${playerValue}`, LOGICAL_W - 14, 22);
+  ctx.restore();
+}
 
-    ctx.shadowColor = e.color;
-    ctx.shadowBlur = 18;
-    drawCircleGrad(e.x, ey, e.r, 'hsl(' + e.hue + ',90%,75%)', 'hsl(' + e.hue + ',90%,45%)');
+// ----- プレイ中 -----
+function drawGame() {
+  // コースオブジェクト描画
+  for (const obj of courseObjects) {
+    if (obj.screenY === undefined) continue;
+    if (obj.screenY < -120 || obj.screenY > LOGICAL_H + 80) continue;
+    if (obj.type === 'gate'  && !obj.passed) drawGate(obj);
+    if (obj.type === 'enemy' && obj.alive)   drawEnemy(obj.x, obj.screenY, obj.value, ENEMY_R);
+  }
+  drawPlayer(playerX, PLAYER_Y, playerValue, PLAYER_R, false);
+  drawHUD();
+}
+
+// ----- ボス場面 -----
+function drawBossScene() {
+  const bx = LOGICAL_W / 2, by = 185;
+  const shake = (gameState === 'BOSS_BATTLE' && bossPhase === 1);
+  drawBoss(bx, by, bossValue, shake);
+
+  // VSテキスト（pulsating）
+  if (bossPhase <= 1) {
+    const sc = 1 + 0.06 * Math.sin(bossAnimT * 4);
+    ctx.save();
+    ctx.translate(LOGICAL_W/2, LOGICAL_H/2 - 18);
+    ctx.scale(sc, sc);
+    ctx.fillStyle = '#ffee00';
+    ctx.font = 'bold 52px system-ui';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.shadowColor = '#ff8800'; ctx.shadowBlur = 22;
+    ctx.fillText('VS', 0, 0);
+    ctx.restore();
+  }
+
+  drawPlayer(LOGICAL_W/2, LOGICAL_H - 155, playerValue, PLAYER_R, shake);
+
+  // 結果パネル
+  if (bossPhase === 2) {
+    const win = bossResult === 'win';
+    ctx.save();
+    ctx.fillStyle = win ? 'rgba(0,22,0,0.76)' : 'rgba(22,0,0,0.76)';
+    ctx.strokeStyle = win ? '#66ff88' : '#ff6666'; ctx.lineWidth = 3;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(25, LOGICAL_H/2 - 68, LOGICAL_W-50, 128, 16);
+    else ctx.rect(25, LOGICAL_H/2-68, LOGICAL_W-50, 128);
+    ctx.fill(); ctx.stroke();
+
+    ctx.fillStyle = win ? '#88ff88' : '#ff8888';
+    ctx.font = 'bold 55px system-ui';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.shadowColor = win ? '#00ff44' : '#ff2200'; ctx.shadowBlur = 22;
+    ctx.fillText(win ? '勝利！' : '敗北…', LOGICAL_W/2, LOGICAL_H/2 - 14);
     ctx.shadowBlur = 0;
-
-    drawFace(e.x, ey, e.r, true);
-
-    // 数値
-    ctx.font = 'bold 13px Arial';
-    ctx.textAlign = 'center';
-    ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-    ctx.lineWidth = 3;
-    ctx.strokeText('' + e.value, e.x, ey + e.r + 16);
-    ctx.fillStyle = '#fff';
-    ctx.fillText('' + e.value, e.x, ey + e.r + 16);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 20px system-ui';
+    ctx.fillText(`${playerValue} vs ${bossValue}`, LOGICAL_W/2, LOGICAL_H/2 + 42);
+    ctx.restore();
   }
+
+  drawHUD();
 }
 
-function drawPlayer() {
-  const py = PLAYER_Y;
-  const bounce = Math.sin(frameCount * 0.08) * 3;
+// ----- タイトル画面 -----
+function drawTitle() {
+  ctx.save();
+  ctx.fillStyle = '#ddaaff';
+  ctx.font = 'bold 46px system-ui';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.shadowColor = '#aa44ff'; ctx.shadowBlur = 28;
+  ctx.fillText('ゲートランナー', LOGICAL_W/2, 148);
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#9988aa'; ctx.font = '17px system-ui';
+  ctx.fillText('Gate Runner', LOGICAL_W/2, 196);
 
-  // 影
-  ctx.beginPath();
-  ctx.ellipse(playerX, py + PLAYER_R + 4, PLAYER_R * 0.8, 7, 0, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.fill();
+  // デモキャラ
+  drawPlayer(LOGICAL_W/2, 280, '10', 26, false);
 
-  ctx.shadowColor = '#60a5fa';
-  ctx.shadowBlur = 24;
-  drawCircleGrad(playerX, py + bounce, PLAYER_R, '#93c5fd', '#2563eb');
+  // 操作説明一覧
+  const rows = [
+    ['青/緑 ゲート', '数値UP',       '#88ff88'],
+    ['赤 ゲート',    '数値DOWN',      '#ff8888'],
+    ['赤い敵',       'ぶつかるとダメージ', '#ffaaaa'],
+    ['ボス',         '自分 > ボス で勝利！', '#ffaaff'],
+  ];
+  ctx.font = '15px system-ui';
+  let ly = 352;
+  for (const [label, desc, col] of rows) {
+    ctx.fillStyle = col; ctx.textAlign = 'left';
+    ctx.fillText(label, 58, ly);
+    ctx.fillStyle = '#ccccdd'; ctx.textAlign = 'left';
+    ctx.fillText('→ ' + desc, 155, ly);
+    ly += 30;
+  }
+
+  ctx.fillStyle = '#bbaacc'; ctx.font = '14px system-ui';
+  ctx.textAlign = 'center';
+  ctx.fillText('スワイプ / 矢印キー で左右移動', LOGICAL_W/2, 492);
+
+  const blink = Math.floor(Date.now() / 560) % 2;
+  ctx.fillStyle = blink ? '#fff' : '#9988bb';
+  ctx.font = 'bold 23px system-ui';
+  ctx.fillText('タップでスタート！', LOGICAL_W/2, 592);
+  ctx.restore();
+}
+
+// ----- 結果画面 -----
+function drawResult(win) {
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(0, 0, LOGICAL_W, LOGICAL_H);
+
+  ctx.fillStyle = win ? '#ffffaa' : '#ffaaaa';
+  ctx.font = `bold ${win ? 58 : 44}px system-ui`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.shadowColor = win ? '#ffaa00' : '#ff0000'; ctx.shadowBlur = 28;
+  ctx.fillText(win ? 'クリア！' : 'ゲームオーバー', LOGICAL_W/2, 195);
   ctx.shadowBlur = 0;
 
-  drawFace(playerX, py + bounce, PLAYER_R, false);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 26px system-ui';
+  ctx.fillText('ステージ ' + stage, LOGICAL_W/2, 285);
+  ctx.fillText('最終数値: ' + playerValue, LOGICAL_W/2, 330);
 
-  // 数値
-  ctx.font = 'bold 15px Arial';
-  ctx.textAlign = 'center';
-  ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-  ctx.lineWidth = 3;
-  ctx.strokeText('' + playerValue, playerX, py + bounce + PLAYER_R + 18);
-  ctx.fillStyle = '#fbbf24';
-  ctx.fillText('' + playerValue, playerX, py + bounce + PLAYER_R + 18);
+  if (win) {
+    const next = Math.max(10, Math.floor(playerValue * 0.7));
+    ctx.fillStyle = '#aaffaa'; ctx.font = '20px system-ui';
+    ctx.fillText('数値を一部引き継いで次ステージへ！', LOGICAL_W/2, 390);
+    ctx.fillStyle = '#ffffcc'; ctx.font = '17px system-ui';
+    ctx.fillText('引継ぎ数値: ' + next, LOGICAL_W/2, 425);
+  }
+
+  const blink = Math.floor(Date.now() / 560) % 2;
+  ctx.fillStyle = blink ? '#fff' : '#888';
+  ctx.font = 'bold 22px system-ui';
+  ctx.fillText('タップでリトライ', LOGICAL_W/2, win ? 515 : 480);
+  ctx.restore();
 }
 
-function drawBattle() {
-  // バトル背景オーバーレイ
-  const grad = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, W);
-  grad.addColorStop(0, 'hsla(' + bgHue + ',70%,20%,0.5)');
-  grad.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, W, H);
-
-  // タイトル
-  ctx.font = 'bold 28px Arial';
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#fbbf24';
-  ctx.shadowColor = '#fbbf24';
-  ctx.shadowBlur = 14;
-  ctx.fillText('BATTLE!', W / 2, 55);
-  ctx.shadowBlur = 0;
-
-  const aliveEnemies = enemies.filter(function(e) { return e.alive; });
-  const currentEnemy = aliveEnemies[0];
-
-  if (currentEnemy && !battleResult) {
-    const enemyX = W * 0.7;
-    const enemyY = H * 0.33;
-    const plX = W * 0.3;
-    const plY = H * 0.58;
-    const r = 36;
-
-    // 敵キャラ
-    ctx.shadowColor = currentEnemy.color;
-    ctx.shadowBlur = 22;
-    drawCircleGrad(enemyX, enemyY, r, 'hsl(' + currentEnemy.hue + ',90%,75%)', 'hsl(' + currentEnemy.hue + ',90%,45%)');
-    ctx.shadowBlur = 0;
-    drawFace(enemyX, enemyY, r, true);
-
-    // 敵数値
-    ctx.font = 'bold 30px Arial';
-    ctx.textAlign = 'center';
-    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-    ctx.lineWidth = 4;
-    ctx.strokeText('' + currentEnemy.value, enemyX, enemyY + r + 28);
-    ctx.fillStyle = '#f87171';
-    ctx.fillText('' + currentEnemy.value, enemyX, enemyY + r + 28);
-
-    // プレイヤーキャラ
-    ctx.shadowColor = '#60a5fa';
-    ctx.shadowBlur = 22;
-    drawCircleGrad(plX, plY, r, '#93c5fd', '#2563eb');
-    ctx.shadowBlur = 0;
-    drawFace(plX, plY, r, false);
-
-    // プレイヤー数値
-    ctx.font = 'bold 30px Arial';
-    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-    ctx.lineWidth = 4;
-    ctx.strokeText('' + playerValue, plX, plY + r + 28);
-    ctx.fillStyle = '#fbbf24';
-    ctx.fillText('' + playerValue, plX, plY + r + 28);
-
-    // VS
-    ctx.font = 'bold 44px Arial';
-    ctx.fillStyle = '#fff';
-    ctx.shadowColor = '#fff';
-    ctx.shadowBlur = 20;
-    ctx.fillText('VS', W / 2, H / 2 - 20);
-    ctx.shadowBlur = 0;
-
-    // 残り敵数
-    ctx.font = '14px Arial';
-    ctx.fillStyle = '#c4b5fd';
-    ctx.fillText('残り ' + aliveEnemies.length + ' 体', W / 2, H - 55);
-  }
-
-  if (battleResult === 'win') {
-    ctx.font = 'bold 52px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillStyle = '#22c55e';
-    ctx.shadowColor = '#22c55e';
-    ctx.shadowBlur = 32;
-    ctx.fillText('WIN!', W / 2, H / 2 + 20);
-    ctx.shadowBlur = 0;
-  }
-  if (battleResult === 'lose') {
-    ctx.font = 'bold 52px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillStyle = '#ef4444';
-    ctx.shadowColor = '#ef4444';
-    ctx.shadowBlur = 32;
-    ctx.fillText('LOSE...', W / 2, H / 2 + 20);
-    ctx.shadowBlur = 0;
+// ----- パーティクル描画 -----
+function drawParticles() {
+  for (const p of particles) {
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, p.life);
+    if (p.type === 'confetti') {
+      ctx.translate(p.x, p.y); ctx.rotate(p.rot || 0);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.r/2, -p.r/2, p.r, p.r * 1.6);
+    } else {
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
   }
 }
 
-// --- メインループ ---
-function loop() {
-  if (state === 'playing') update();
+// ----- ポップアップテキスト描画 -----
+function drawPopups() {
+  for (const p of popups) {
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, p.life);
+    ctx.fillStyle = p.color;
+    ctx.font = 'bold 27px system-ui';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.shadowColor = p.color; ctx.shadowBlur = 10;
+    ctx.fillText(p.text, p.x, p.y);
+    ctx.restore();
+  }
+}
+
+// ======================================================
+// 入力ハンドラ
+// ======================================================
+function handleTap() {
+  getAudio(); // AudioContext unlock
+  if (gameState === 'TITLE') {
+    stage = 1; playerValue = 10;
+    initStars(); initStage();
+  } else if (gameState === 'WIN') {
+    stage++;
+    playerValue = Math.max(10, Math.floor(playerValue * 0.7));
+    initStage();
+  } else if (gameState === 'LOSE') {
+    playerValue = 10;
+    initStage();
+  }
+}
+
+// ----- Pointer Events（タッチ / マウス統一）-----
+canvas.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  if (gameState !== 'PLAYING') { handleTap(); return; }
+  const rect = canvas.getBoundingClientRect();
+  const sx = LOGICAL_W / rect.width;
+  pointerActive   = true;
+  pointerStartX   = (e.clientX - rect.left) * sx;
+  pointerCurrentX = pointerStartX;
+  canvas.setPointerCapture(e.pointerId);
+}, { passive: false });
+
+canvas.addEventListener('pointermove', e => {
+  e.preventDefault();
+  if (!pointerActive) return;
+  const rect = canvas.getBoundingClientRect();
+  const sx = LOGICAL_W / rect.width;
+  pointerCurrentX = (e.clientX - rect.left) * sx;
+}, { passive: false });
+
+canvas.addEventListener('pointerup', e => {
+  e.preventDefault();
+  pointerActive = false;
+});
+canvas.addEventListener('pointercancel', () => { pointerActive = false; });
+
+// ----- キーボード（←→ / WASD / Space / Enter）-----
+window.addEventListener('keydown', e => {
+  if (e.key === 'ArrowLeft'  || e.key === 'a' || e.key === 'A') inputLeft  = true;
+  if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') inputRight = true;
+  if ((e.key === ' ' || e.key === 'Enter') &&
+      gameState !== 'PLAYING' && gameState !== 'BOSS_INTRO' && gameState !== 'BOSS_BATTLE') {
+    handleTap();
+  }
+});
+window.addEventListener('keyup', e => {
+  if (e.key === 'ArrowLeft'  || e.key === 'a' || e.key === 'A') inputLeft  = false;
+  if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') inputRight = false;
+});
+
+// ======================================================
+// メインゲームループ（requestAnimationFrame + deltaTime）
+// ======================================================
+function gameLoop(timestamp) {
+  // deltaTime: 最大50ms（= 20fps相当）にクランプ
+  const dt = Math.min((timestamp - lastTime) / 1000, 0.05);
+  lastTime = timestamp;
+
+  update(dt);
   draw();
-  requestAnimationFrame(loop);
+  requestAnimationFrame(gameLoop);
 }
 
-loop();
+// ======================================================
+// 起動
+// ======================================================
+initStars();
+requestAnimationFrame(ts => {
+  lastTime = ts;
+  requestAnimationFrame(gameLoop);
+});
 </script>
 </body>
 </html>
