@@ -43,7 +43,7 @@ const GATE_W      = 80;
 const GATE_H      = 50;
 const GATE_ROWS   = 7;
 const ROW_SPACING = 210;     // world-Yでのゲート行間隔
-const COURSE_STARTWORLD_Y = 180; // コース先頭のworld-Y
+const COURSE_STARTWORLD_Y = 700; // コース先頭のworld-Y（PLAYER_Y+120 で画面直上からスタート）
 
 // ======================================================
 // Canvas セットアップ（論理解像度固定・CSS letterbox）
@@ -360,7 +360,7 @@ function update(dt) {
 
   // コースオブジェクト: screen-Y計算 & 衝突
   for (const obj of courseObjects) {
-    obj.screenY = obj.y - scrollY + LOGICAL_H * 0.15;
+    obj.screenY = scrollY - obj.y + PLAYER_Y;  // 正しい方向: scrollY増→screenY増（下に降りてくる）
     if (obj.screenY < -120 || obj.screenY > LOGICAL_H + 80) continue;
 
     if (obj.type === 'gate' && !obj.passed) {
